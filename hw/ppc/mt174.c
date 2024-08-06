@@ -16,6 +16,7 @@
 #include "hw/irq.h"
 #include "exec/memory.h"
 #include "exec/address-spaces.h"
+#include "hw/comm-port/commport.h"
 
 typedef struct {
     MachineState parent;
@@ -31,6 +32,8 @@ typedef struct {
     GRETHState greth[2];
 
     KeyasicSdState sdio;
+
+    comm_state comm;
 
     /* board properties */
     uint8_t boot_cfg;
@@ -527,9 +530,15 @@ static void mt174_init(MachineState *machine)
     memory_region_init_ram(spacewire3, NULL, "spacewire3", 4 * KiB, &error_fatal);
     memory_region_add_subregion(get_system_memory(), 0x20c0303000, spacewire3);
 
-    MemoryRegion *COM0 = g_new(MemoryRegion, 1);
-    memory_region_init_ram(COM0, NULL, "COM0", 4 * KiB, &error_fatal);
-    memory_region_add_subregion(get_system_memory(), 0x20c0304000, COM0);
+    if (qemu_chr_find("NMCOMM")) {
+        object_initialize_child(OBJECT(s), "comm", &s->comm, TYPE_COMM);
+        qdev_prop_set_chr(DEVICE(&s->comm), "CommChardev", qemu_chr_find("NMCOMM"));
+        sysbus_realize(SYS_BUS_DEVICE(&s->comm), &error_fatal);
+        busdev = SYS_BUS_DEVICE(&s->comm);
+        memory_region_add_subregion(get_system_memory(), 0x20c0304000,
+                                    sysbus_mmio_get_region(busdev, 0));
+        //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic, )));
+    }
 
     MemoryRegion *COM1 = g_new(MemoryRegion, 1);
     memory_region_init_ram(COM1, NULL, "COM1", 4 * KiB, &error_fatal);

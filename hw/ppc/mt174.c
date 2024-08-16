@@ -33,7 +33,7 @@ typedef struct {
 
     KeyasicSdState sdio;
 
-    comm_state comm;
+    comm_state comm[2];
 
     /* board properties */
     uint8_t boot_cfg;
@@ -530,19 +530,59 @@ static void mt174_init(MachineState *machine)
     memory_region_init_ram(spacewire3, NULL, "spacewire3", 4 * KiB, &error_fatal);
     memory_region_add_subregion(get_system_memory(), 0x20c0303000, spacewire3);
 
-    if (qemu_chr_find("NMCOMM")) {
-        object_initialize_child(OBJECT(s), "comm", &s->comm, TYPE_COMM);
-        qdev_prop_set_chr(DEVICE(&s->comm), "CommChardev", qemu_chr_find("NMCOMM"));
-        sysbus_realize(SYS_BUS_DEVICE(&s->comm), &error_fatal);
-        busdev = SYS_BUS_DEVICE(&s->comm);
+    ////////////
+    // Chardev *qemu_chr_find(const char *name);
+    // -chardev socket,id=mirror0,host=0,port=9003,server=on,wait=off
+    if (qemu_chr_find("NMCOMM0")) {
+        object_initialize_child(OBJECT(s), "comm0", &s->comm[0], TYPE_COMM);
+        comm_change_address_space(&s->comm[0], axi_addr_space, &error_fatal);
+        qdev_prop_set_chr(DEVICE(&s->comm[0]), "CommChardev", qemu_chr_find("NMCOMM0"));
+        sysbus_realize(SYS_BUS_DEVICE(&s->comm[0]), &error_fatal);
+        busdev = SYS_BUS_DEVICE(&s->comm[0]);
         memory_region_add_subregion(get_system_memory(), 0x20c0304000,
                                     sysbus_mmio_get_region(busdev, 0));
         //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic, )));
-    }
+    } //need to set second copy of device
+////////////
 
-    MemoryRegion *COM1 = g_new(MemoryRegion, 1);
-    memory_region_init_ram(COM1, NULL, "COM1", 4 * KiB, &error_fatal);
-    memory_region_add_subregion(get_system_memory(), 0x20c0305000, COM1);
+    /*       XorTestState *s = XOR_TEST(obj);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
+
+    RegisterInfoArray *reg_array;
+
+    memory_region_init(&s->iomem, obj, TYPE_XOR_TEST,
+                        R_MAX * 4);
+    reg_array = register_init_block32(DEVICE(obj), xor_test_regs_info,
+                               ARRAY_SIZE(xor_test_regs_info),
+                               s->regs_info, s->regs,
+                               &xor_test_ops,
+                               XOR_TEST_ERR_DEBUG,
+                               R_MAX * 4);
+
+    memory_region_add_subregion(&s->iomem, 0x00, ®_array->mem);
+    sysbus_init_mmio(sbd, &s->iomem);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);*/
+
+    /*if (qemu_chr_find("NMCOMM1")) {
+        object_initialize_child(OBJECT(s), "comm", &s->comm, TYPE_COMM);
+        qdev_prop_set_chr(DEVICE(&s->comm), "CommChardev", qemu_chr_find("NMCOMM1"));
+        sysbus_realize(SYS_BUS_DEVICE(&s->comm), &error_fatal);
+        busdev = SYS_BUS_DEVICE(&s->comm);
+        memory_region_add_subregion(get_system_memory(), 0x20c0305000,
+                                    sysbus_mmio_get_region(busdev, 0));
+        //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic, )));
+    } //need to set second copy of device*/
+
+    if (qemu_chr_find("NMCOMM1")) {
+        object_initialize_child(OBJECT(s), "comm1", &s->comm[1], TYPE_COMM);
+        comm_change_address_space(&s->comm[1], axi_addr_space, &error_fatal);
+        qdev_prop_set_chr(DEVICE(&s->comm[1]), "CommChardev", qemu_chr_find("NMCOMM1"));
+        sysbus_realize(SYS_BUS_DEVICE(&s->comm[1]), &error_fatal);
+        busdev = SYS_BUS_DEVICE(&s->comm[1]);
+        memory_region_add_subregion(get_system_memory(), 0x20c0305000,
+                                    sysbus_mmio_get_region(busdev, 0));
+        //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic, )));
+    } //need to set second copy of device
 
     MemoryRegion *AXI_DMA = g_new(MemoryRegion, 1);
     memory_region_init_ram(AXI_DMA, NULL, "AXI_DMA", 4 * KiB, &error_fatal);

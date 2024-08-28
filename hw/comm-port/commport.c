@@ -102,25 +102,63 @@
 #define OPERATION_NONE              -1
 #define OPERATION_READ              0
 #define OPERATION_WRITE             1
+#define OPERATION_CHECK(op)         (op > 0x1C) ? OPERATION_WRITE : OPERATION_READ
 
-#define READ_CONDITION
 
-
-/*if (s->comm_mem_curr_size % 8 == 0) {
-    //запись в память
-}*/
-
-//enum
-
-static unsigned short arbitration_op(comm_state *s, hwaddr addr) {
-    if ((s->comm_current_operation_type == OPERATION_READ) && (addr | WR_MASK)
-                                                            && (s->comm_rx_counter != 0))
+static uint8_t arbitration_op(comm_state *s, uint8_t income_operation_type) {
+    if ((s->comm_current_operation_type == OPERATION_READ)
+            && (income_operation_type == OPERATION_WRITE))
         return 0;
 
-    if ((s->comm_current_operation_type == OPERATION_WRITE) && (addr | RD_MASK))
+    if ((s->comm_current_operation_type == OPERATION_WRITE)
+                                            && (income_operation_type == OPERATION_READ))
         return 0;
     //здесь должно быть обновление состояний
-    return 1;
+    if ((s->comm_CSR == COMM_CTRL_EN) && s->comm_main_counter) {
+        return 1;
+    }
+    return 0;
+}
+
+//возможно луычше поделить их на две функции comm_write_to_mem/comm_read_to_mem
+static void comm_action(comm_state *s, uint8_t operation_type) {
+
+    if (operation_type == OPERATION_WRITE) {
+
+        printf("write has been reached fully\n\n");
+        s->comm_current_operation_type = OPERATION_WRITE;
+        dma_memory_read(s->addr_space, s->comm_address, &s->comm_rx,
+                        s->comm_main_counter * COMM_MEM_WR_LEN, MEMTXATTRS_UNSPECIFIED);//
+
+        const uint8_t* buf = s->comm_rx; //это не очень правильно
+        qemu_chr_fe_write_all(&s->comm_chr, buf, s->comm_main_counter * COMM_MEM_WR_LEN); //сомнительно, но окээээй, т.к. должно передаваться по байтам, но мб из-за того, что это функция char, оно так и будет делать
+        s->comm_address += s->comm_main_counter * COMM_MEM_WR_LEN;
+        s->comm_main_counter = 0;
+
+    } else if (operation_type == OPERATION_READ) {
+
+        printf("read has been reached fully\n\n");
+        uint64_t value = 0;
+        if (s->comm_main_counter == 0) {
+            //по-идее, эта ситуация невозможна и просто высосана из пальца
+            return;
+        }
+        for (int i = 0; i < COMM_MEM_WR_LEN; i++) {
+            value |= ((uint64_t)s->comm_rx[i] << (COMM_MEM_WR_LEN * i));
+        }
+        memmove(s->comm_rx, s->comm_rx + s->comm_rx_counter, s->comm_rx_counter - COMM_MEM_WR_LEN);
+        s->comm_main_counter--;
+        dma_memory_write(s->addr_space, s->comm_address, &value,
+                            COMM_MEM_WR_LEN, MEMTXATTRS_UNSPECIFIED);
+        s->comm_address += COMM_MEM_WR_LEN;
+    }
+    if ((s->comm_CSR == COMM_CTRL_EN) && !s->comm_main_counter) {
+        s->comm_current_operation_type = OPERATION_NONE;
+        s->comm_CSR = COMM_CTRL_CPL;
+    }
+    printf("%s %x\n\n", "MAINCOUNTER", s->comm_main_counter);
+    printf("%s %x\n\n", "ADDRESS", s->comm_address);
+    printf("%s %x\n\n", "CSR", s->comm_CSR);
 }
 
 static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
@@ -131,13 +169,11 @@ static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
     switch (addr) {
     case REG_RD_MAIN_COUNTER:
     case REG_WR_MAIN_COUNTER:
-        printf("%s\n", "MAINCOUNTER\n\n");
         val = s->comm_main_counter;
         break;
 
     case REG_RD_CURR_ADDRESS:
     case REG_WR_CURR_ADDRESS:
-        printf("%s\n", "CURR_ADDR\n\n");
         val = s->comm_address;
         break;
 
@@ -158,7 +194,6 @@ static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
 
     case REG_RD_CSR:
     case REG_WR_CSR:
-        printf("%s", "CSR\n\n");
         val = s->comm_CSR;
         break;
 
@@ -194,56 +229,21 @@ static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
     return val;
 }
 
-static void comm_action(comm_state *s, hwaddr addr, uint64_t *char_value) {
-
-    if ((s->comm_CSR == COMM_CTRL_EN) && s->comm_main_counter) {
-
-        if (s->comm_rx_counter == 0) {//либо передается байт за раз, либо просто циклом передастся все
-            printf("write has been reached fully\n\n");
-            s->comm_current_operation_type = OPERATION_WRITE;
-            //dma_memory_write(&s->comm_chr, (uint8_t *)char_value, COMM_CHAR_LEN);
-            s->comm_main_counter--;
-            return;
-        }
-
-        printf("read has been reached fully\n\n");
-        for (int i = 0; i < COMM_MEM_WR_LEN; i++) {
-            *char_value |= ((uint64_t)s->comm_rx[i] << (COMM_MEM_WR_LEN * i));
-        }
-        memmove(s->comm_rx, s->comm_rx + COMM_MEM_WR_LEN, s->comm_rx_counter - COMM_MEM_WR_LEN); //second arg can be s->comm_rx[1]
-
-        s->comm_rx_counter -= COMM_MEM_WR_LEN;
-        s->comm_main_counter--;
-
-        addr = s->comm_address; //сомнительно бля
-        qemu_chr_fe_accept_input(&s->comm_chr); //maybe qemu_chr_fe_read
-        s->comm_address += COMM_MEM_WR_LEN;
-        //irq later
-        //return char_value; я хуй знает, что с этим делать
-    } else if ((s->comm_CSR == COMM_CTRL_EN) && !s->comm_main_counter) {
-        s->comm_current_operation_type = OPERATION_NONE;
-        s->comm_CSR = COMM_CTRL_CPL;
-    }
-}//dma_memory_read, dma_memory_write
 
 static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 {
     comm_state *s = COMM(opaque);
-
-    //uint8_t opeartion_type = (addr & WR_MASK) ? OPERATION_WRITE : OPERATION_READ;
-    uint64_t char_value = (uint8_t)val;
+    uint8_t operation_type = OPERATION_CHECK(addr);
 
     switch (addr) {
-    case REG_RD_MAIN_COUNTER:
+    case REG_RD_MAIN_COUNTER: //ЭТО ПОТЕНИАЛЬНАЯ ОПАСНОСТЬ В ИЗМЕНЕНИИ ЗНАЧЕНИЯ В ЭТОЙ ПЕРЕМЕННОЙ НА НЕЖЕЛАЕМОЕ
     case REG_WR_MAIN_COUNTER:
         s->comm_main_counter = val;
-        printf("%s %lx\n\n", "MAINCOUNTER", val);
         break;
 
     case REG_WR_CURR_ADDRESS:
     case REG_RD_CURR_ADDRESS:
         s->comm_address = val;
-        printf("%s %lx\n\n", "CURR_ADDR", val);
         break;
 
     case REG_RD_BIAS:
@@ -265,7 +265,6 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
     case REG_RD_CSR:
     case REG_WR_CSR:
         s->comm_CSR = val;
-        printf("%s %lx\n\n", "CSR", val);
         break;
 
     case REG_RD_INERRUPT:
@@ -293,12 +292,19 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
     default: break;
     }
 
-    if (!arbitration_op(s, addr)) {
+    if ((s->comm_address == 0) || (s->comm_main_counter == 0))
+        return;
+
+    if (!arbitration_op(s, operation_type)) {
         return;
     }
 
-    comm_action(s, addr, &char_value);
-
+    if (operation_type == OPERATION_WRITE)
+        comm_action(s, OPERATION_WRITE);
+    else if (operation_type == OPERATION_READ){
+        qemu_chr_fe_accept_input(&s->comm_chr);
+        printf("%s\n\n", "READY TO RECEIVE");
+    }
 }
 ///qemu_chr_fe_ioctl(&s->chr, CHR_IOCTL_SERIAL_SET_BREAK,
 //                              &break_enable);
@@ -332,7 +338,7 @@ static void comm_reset(DeviceState *dev)
     s->comm_CSR = 0;
     s->comm_interrupt_mask = 0;
     s->comm_internal_state = 0;
-    s->comm_current_operation_type = 0;
+    s->comm_current_operation_type = OPERATION_NONE;
     //s->comm_status = 0x0;
 
     //qemu_set_irq(s->irq, 0);
@@ -342,17 +348,19 @@ static int comm_can_receive(void *opaque)
 {
     comm_state *s = opaque;
 
-    if ((s->comm_rx_counter == 64) || s->comm_main_counter == 8)
+    if ((s->comm_rx_counter == 10000) || (s->comm_main_counter == 0)){
         return 0;
+    }
 
-    if (!arbitration_op(s, RD_MASK))
+    if (!arbitration_op(s, RD_MASK)) {
         return 0;
+    }
 
     s->comm_current_operation_type = OPERATION_READ; //возможно, не стоит испытывать судьбу и перенести эту строчку ниже
 
     printf("point comm_can_receive \n\n");
     return COMM_CHAR_LEN;
-} //about 8 - comm_rx can contain max 8 64 bit words
+} //about 8 - comm_rx can contain max 8 64 bit words qemu_chr_fe_write
 
 
 static void comm_receive(void *opaque, const uint8_t *data_char, int size)
@@ -361,8 +369,17 @@ static void comm_receive(void *opaque, const uint8_t *data_char, int size)
     comm_state *s = opaque;
     s->comm_rx[s->comm_rx_counter] = *data_char;
     s->comm_rx_counter += COMM_CHAR_LEN;
-    if (!(s->comm_rx_counter % COMM_MEM_WR_LEN))
-        s->comm_main_counter++;
+
+
+    for (int i = 0; i < s->comm_rx_counter; i++) {
+        printf("%x\t", s->comm_rx[i]);
+    }
+    if (!(s->comm_rx_counter % 8)) {
+        if (s->comm_address != 0) {
+            comm_action(s, OPERATION_READ);
+            printf("ACTION \n\n");
+        }
+    }
 }
 
 void comm_change_address_space(comm_state *s, AddressSpace *addr_space, Error **errp)

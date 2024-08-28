@@ -14,8 +14,8 @@ struct comm_state
     //uint64_t chip_id;
     uint32_t comm_data_reg;
     uint32_t comm_rx_max_size;
-    uint8_t comm_rx_counter;
-    uint8_t comm_rx[64]; //still dont sure in 64. can be more bcs on physic was translated 12 bytes(96 bits > 64) and more
+    uint16_t comm_rx_counter;
+    uint8_t comm_rx[10000]; //still dont sure in 64. can be more bcs on physic was translated 12 bytes(96 bits > 64) and more
     //uint32_t comm_baudbase; //могу задавать произвольно
     uint32_t comm_ctrl;
     uint32_t comm_status; //GET_ARC - Счётчик активных запросов

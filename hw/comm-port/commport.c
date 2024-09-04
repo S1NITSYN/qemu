@@ -127,29 +127,29 @@ static void comm_action(comm_state *s, uint8_t operation_type) {
 
         printf("write has been reached fully\n\n");
         s->comm_current_operation_type = OPERATION_WRITE;
-        dma_memory_read(s->addr_space, s->comm_address, &s->comm_rx,
-                        s->comm_main_counter * COMM_MEM_WR_LEN, MEMTXATTRS_UNSPECIFIED);//
 
-        const uint8_t* buf = s->comm_rx; //это не очень правильно
-        qemu_chr_fe_write_all(&s->comm_chr, buf, s->comm_main_counter * COMM_MEM_WR_LEN); //сомнительно, но окээээй, т.к. должно передаваться по байтам, но мб из-за того, что это функция char, оно так и будет делать
-        s->comm_address += s->comm_main_counter * COMM_MEM_WR_LEN;
+        for (int i = 0; i < s->comm_main_counter; i++) {
+            dma_memory_read(s->addr_space, s->comm_address, &s->comm_rx,
+                            COMM_MEM_WR_LEN, MEMTXATTRS_UNSPECIFIED);//возможно тут можно зациклить и отправлять данные небольшими порциями
+            qemu_chr_fe_write_all(&s->comm_chr, (void *)s->comm_rx, COMM_MEM_WR_LEN); //передается ебаной пачкой в любое количество байт
+            s->comm_address += COMM_MEM_WR_LEN;
+        }
+
         s->comm_main_counter = 0;
 
     } else if (operation_type == OPERATION_READ) {
-
         printf("read has been reached fully\n\n");
+
         uint64_t value = 0;
-        if (s->comm_main_counter == 0) {
-            //по-идее, эта ситуация невозможна и просто высосана из пальца
+        if (s->comm_main_counter == 0) { //mb useless
             return;
         }
-        for (int i = 0; i < COMM_MEM_WR_LEN; i++) {
-            value |= ((uint64_t)s->comm_rx[i] << (COMM_MEM_WR_LEN * i));
-        }
-        memmove(s->comm_rx, s->comm_rx + s->comm_rx_counter, s->comm_rx_counter - COMM_MEM_WR_LEN);
+        value = *((uint64_t*)s ->comm_rx);
+        s->comm_rx_counter -= COMM_MEM_WR_LEN;
+        memmove(s->comm_rx, s->comm_rx + s->comm_rx_counter, s->comm_rx_counter);
         s->comm_main_counter--;
         dma_memory_write(s->addr_space, s->comm_address, &value,
-                            COMM_MEM_WR_LEN, MEMTXATTRS_UNSPECIFIED);
+                            COMM_MEM_WR_LEN, MEMTXATTRS_UNSPECIFIED);   
         s->comm_address += COMM_MEM_WR_LEN;
     }
     if ((s->comm_CSR == COMM_CTRL_EN) && !s->comm_main_counter) {
@@ -325,7 +325,6 @@ static void comm_reset(DeviceState *dev)
     comm_state *s = COMM(dev);
 
     s->comm_rx_counter = 0;
-    s->comm_rx_max_size = 1000; //hardcode for now
     //s->comm_baudbase = 115200;
     s->comm_data_reg = 0;
     s->comm_ctrl = 0;
@@ -374,6 +373,8 @@ static void comm_receive(void *opaque, const uint8_t *data_char, int size)
     for (int i = 0; i < s->comm_rx_counter; i++) {
         printf("%x\t", s->comm_rx[i]);
     }
+    printf("%d\t\n", s->comm_rx_counter);
+
     if (!(s->comm_rx_counter % 8)) {
         if (s->comm_address != 0) {
             comm_action(s, OPERATION_READ);

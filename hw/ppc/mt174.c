@@ -537,11 +537,13 @@ static void mt174_init(MachineState *machine)
         object_initialize_child(OBJECT(s), "comm0", &s->comm[0], TYPE_COMM);
         comm_change_address_space(&s->comm[0], axi_addr_space, &error_fatal);
         qdev_prop_set_chr(DEVICE(&s->comm[0]), "CommChardev", qemu_chr_find("NMCOMM0"));
+        qdev_prop_set_uint8(DEVICE(&s->comm[0]), "RegistersMode", 1);
         sysbus_realize(SYS_BUS_DEVICE(&s->comm[0]), &error_fatal);
         busdev = SYS_BUS_DEVICE(&s->comm[0]);
         memory_region_add_subregion(get_system_memory(), 0x20c0304000,
-                                    sysbus_mmio_get_region(busdev, 0));
-        //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic, )));
+                                    sysbus_mmio_get_region(busdev, 0)); //тут прерывания 78-79
+        sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic), 79));
+        sysbus_connect_irq(busdev, 1, qdev_get_gpio_in(DEVICE(&s->mpic), 78));
     } //need to set second copy of device
 ////////////
 
@@ -577,12 +579,14 @@ static void mt174_init(MachineState *machine)
         object_initialize_child(OBJECT(s), "comm1", &s->comm[1], TYPE_COMM);
         comm_change_address_space(&s->comm[1], axi_addr_space, &error_fatal);
         qdev_prop_set_chr(DEVICE(&s->comm[1]), "CommChardev", qemu_chr_find("NMCOMM1"));
+        qdev_prop_set_uint8(DEVICE(&s->comm[1]), "RegistersMode", 1);
         sysbus_realize(SYS_BUS_DEVICE(&s->comm[1]), &error_fatal);
         busdev = SYS_BUS_DEVICE(&s->comm[1]);
         memory_region_add_subregion(get_system_memory(), 0x20c0305000,
-                                    sysbus_mmio_get_region(busdev, 0));
-        //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic, )));
-    } //need to set second copy of device
+                                    sysbus_mmio_get_region(busdev, 0)); //тут прерывания 80-81
+        sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->mpic), 81));
+        sysbus_connect_irq(busdev, 1, qdev_get_gpio_in(DEVICE(&s->mpic), 80));
+    }
 
     MemoryRegion *AXI_DMA = g_new(MemoryRegion, 1);
     memory_region_init_ram(AXI_DMA, NULL, "AXI_DMA", 4 * KiB, &error_fatal);

@@ -1,9 +1,10 @@
 #ifndef COMM_H
 #define COMM_H
+
 #include "hw/sysbus.h"
 #include "chardev/char-fe.h"
 
-struct comm_state {
+struct CommState {
     SysBusDevice parent;
     MemoryRegion iomem;
 
@@ -38,13 +39,13 @@ struct comm_state {
     qemu_irq irq1;
 };
 
-typedef struct comm_state comm_state;
+typedef struct CommState CommState;
 typedef uint32_t nmc_byte_t;
 
 #define TYPE_COMM "comm"
-#define COMM(obj) OBJECT_CHECK(comm_state, (obj), TYPE_COMM)
+#define COMM(obj) OBJECT_CHECK(CommState, (obj), TYPE_COMM)
 
-void comm_change_address_space(comm_state *s, AddressSpace *addr_space,
+void comm_change_address_space(CommState *s, AddressSpace *addr_space,
                                Error **errp);
 
-#endif
+#endif /* COMM_H */

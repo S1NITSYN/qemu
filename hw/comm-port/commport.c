@@ -32,7 +32,7 @@
 #define REG_OPTIONAL_ERR2_C 0x36
 
 #define PACKET_LEN_STANDART 8
-#define PACKET_LEN_WITH_HAMMING 11
+#define PACKET_LEN_WITH_HAMMING (PACKET_LEN_STANDART + 3)
 
 #define COMM_CTRL_EN 0x1
 #define COMM_CTRL_CPL 0x2
@@ -69,7 +69,6 @@ static void comm_tx(comm_state *s)
 
     buffer = malloc(size * sizeof(uint8_t));
     uint8_t dma_read_result;
-    printf("write has been reached fully\n\n");
     for (int i = 0; i < s->comm_transmit_main_counter; i++) {
         dma_read_result =
             dma_memory_read(s->addr_space, s->comm_transmit_address, buffer,
@@ -93,18 +92,11 @@ static void comm_tx(comm_state *s)
         s->comm_transmit_internal_state = COMM_INTERNAL_STATE_COMPLETE;
         comm_update_irq(s);
     }
-    printf("%s %x\n\n", "MAINCOUNTER", s->comm_transmit_main_counter);
-    printf("%s %lx\n\n", "ADDRESS",
-           (s->registers_mode == NMC_MODE)
-               ? (s->comm_transmit_address / sizeof(nmc_byte_t))
-               : s->comm_transmit_address);
-    printf("%s %x\n\n", "CSR", s->comm_transmit_CSR);
 }
 
 static void comm_rx(comm_state *s, const uint8_t *buffer)
 {
     uint8_t dma_write_result;
-    printf("read has been reached fully\n\n");
     dma_write_result =
         dma_memory_write(s->addr_space, s->comm_receive_address, buffer,
                          PACKET_LEN_STANDART, MEMTXATTRS_UNSPECIFIED);
@@ -124,12 +116,6 @@ static void comm_rx(comm_state *s, const uint8_t *buffer)
         s->comm_receive_internal_state = COMM_INTERNAL_STATE_COMPLETE;
         comm_update_irq(s);
     }
-    printf("%s %x\n\n", "MAINCOUNTER", s->comm_receive_main_counter);
-    printf("%s %lx\n\n", "ADDRESS",
-           (s->registers_mode == NMC_MODE)
-               ? (s->comm_receive_address / sizeof(nmc_byte_t))
-               : s->comm_receive_address);
-    printf("%s %x\n\n", "CSR", s->comm_receive_CSR);
 }
 
 static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
@@ -141,12 +127,10 @@ static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
     switch (addr) {
     case REG_TRANSMIT_MAIN_COUNTER:
         val = s->comm_transmit_main_counter;
-        printf("%s\n", "READ FROM MAIN_COUNTER");
 
         break;
     case REG_RECEIVE_MAIN_COUNTER:
         val = s->comm_receive_main_counter;
-        printf("%s\n", "READ FROM MAIN_COUNTER");
 
         break;
 
@@ -154,93 +138,76 @@ static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
         val = (s->registers_mode == NMC_MODE)
                   ? (s->comm_transmit_address / sizeof(nmc_byte_t))
                   : s->comm_transmit_address;
-        printf("%s\n", "READ FROM CURR_ADDRESS");
 
         break;
     case REG_RECEIVE_CURR_ADDRESS:
         val = (s->registers_mode == NMC_MODE)
                   ? (s->comm_receive_address / sizeof(nmc_byte_t))
                   : s->comm_receive_address;
-        printf("%s\n", "READ FROM CURR_ADDRESS");
 
         break;
 
     case REG_TRANSMIT_BIAS:
         val = s->comm_transmit_bias;
-        printf("%s\n", "READ FROM BIAS");
 
         break;
     case REG_RECEIVE_BIAS:
         val = s->comm_receive_bias;
-        printf("%s\n", "READ FROM BIAS");
 
         break;
 
     case REG_TRANSMIT_ROW_COUNTER:
         val = s->comm_transmit_row_counter;
-        printf("%s\n", "READ FROM ROW_COUNTER");
 
         break;
     case REG_RECEIVE_ROW_COUNTER:
         val = s->comm_receive_row_counter;
-        printf("%s\n", "READ FROM ROW_COUNTER");
 
         break;
 
     case REG_TRANSMIT_ADDRESSING_MODE:
         val = s->comm_transmit_addressing_mode;
-        printf("%s\n", "READ FROM ADDRESSING_MODE");
 
         break;
     case REG_RECEIVE_ADDRESSING_MODE:
         val = s->comm_receive_addressing_mode;
-        printf("%s\n", "READ FROM ADDRESSING_MODE");
 
         break;
 
     case REG_TRANSMIT_CSR:
         val = s->comm_transmit_CSR;
-        // printf("%lx\t%s\n", val, "READ FROM TRANSMIT CSR");
         break;
     case REG_RECEIVE_CSR:
         val = s->comm_receive_CSR;
-        // printf("%lx\t%s\n", val, "READ FROM RECEIVE CSR");
         break;
 
     case REG_TRANSMIT_INTERRUPT:
         val = s->comm_transmit_interrupt_mask;
-        printf("%s\n", "READ FROM INTERRUPT");
 
         break;
     case REG_RECEIVE_INTERRUPT:
         val = s->comm_receive_interrupt_mask;
-        printf("%s\n", "READ FROM INTERRUPT");
 
         break;
 
     case REG_TRANSMIT_STATE:
         val = s->comm_transmit_internal_state;
-        printf("%s\n", "READ FROM STATE");
 
         break;
     case REG_RECEIVE_STATE:
         val = s->comm_receive_internal_state;
-        printf("%s\n", "READ FROM STATE");
 
         break;
     case REG_OPTIONAL_HC:
         val = s->comm_optional_hc;
-        printf("%s\n", "READ FROM HC");
 
         break;
     case REG_OPTIONAL_ERR1_C:
         val = s->comm_optional_err1_c;
-        printf("%s\n", "READ FROM ERR1");
 
         break;
     case REG_OPTIONAL_ERR2_C:
         val = s->comm_optional_err2_c;
-        printf("%s\n", "READ FROM ERR2");
 
         break;
 
@@ -259,63 +226,52 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
     switch (addr) {
     case REG_TRANSMIT_MAIN_COUNTER:
         s->comm_transmit_main_counter = val;
-        printf("%s\n", "WROTE TO TRANSMIT MAIN_COUNTER");
 
         break;
     case REG_RECEIVE_MAIN_COUNTER:
         s->comm_receive_main_counter = val;
-        printf("%s\n", "WROTE TO RECEIVEMAIN_COUNTER");
 
         break;
 
     case REG_TRANSMIT_CURR_ADDRESS:
         s->comm_transmit_address = DROP_LAST_3BITS(
             (s->registers_mode == NMC_MODE) ? (val * sizeof(nmc_byte_t)) : val);
-        printf("%s\n", "WROTE TO TRANSMIT CURR_ADDRESS");
 
         break;
     case REG_RECEIVE_CURR_ADDRESS:
         s->comm_receive_address = DROP_LAST_3BITS(
             (s->registers_mode == NMC_MODE) ? (val * sizeof(nmc_byte_t)) : val);
-        printf("%s\n", "WROTE TO RECEIVE CURR_ADDRESS");
 
         break;
 
     case REG_TRANSMIT_BIAS:
         s->comm_transmit_bias = val;
-        printf("%s\n", "WROTE TO TRANSMIT BIAS");
 
         break;
     case REG_RECEIVE_BIAS:
         s->comm_receive_bias = val;
-        printf("%s\n", "WROTE TO RECEIVE BIAS");
 
         break;
 
     case REG_TRANSMIT_ROW_COUNTER:
         s->comm_transmit_row_counter = val;
-        printf("%s\n", "WROTE TO TRANSMIT ROW_COUNTER");
 
         break;
     case REG_RECEIVE_ROW_COUNTER:
         s->comm_receive_row_counter = val;
-        printf("%s\n", "WROTE TO RECEIVE ROW_COUNTER");
 
         break;
 
     case REG_TRANSMIT_ADDRESSING_MODE:
         s->comm_transmit_addressing_mode = val;
-        printf("%s\n", "WROTE TO TRANSMIT ADDRESSING_MODE");
 
         break;
     case REG_RECEIVE_ADDRESSING_MODE:
         s->comm_receive_addressing_mode = val;
-        printf("%s\n", "WROTE TO RECEIVE ADDRESSING_MODE");
 
         break;
 
     case REG_TRANSMIT_CSR:
-        printf("%s\n", "WROTE TO TRANSMIT CSR");
         s->comm_transmit_CSR = val;
         if (s->comm_transmit_CSR != COMM_CTRL_EN) {
             break;
@@ -325,7 +281,6 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 
         break;
     case REG_RECEIVE_CSR:
-        printf("%s\n", "WROTE TO RECEIVE CSR");
         s->comm_receive_CSR = val;
         if (s->comm_receive_CSR != COMM_CTRL_EN) {
             break;
@@ -336,28 +291,23 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 
     case REG_TRANSMIT_INTERRUPT:
         s->comm_transmit_interrupt_mask = val;
-        printf("%s\n", "WROTE TO RECEIVE INTERRUPT");
 
         break;
     case REG_RECEIVE_INTERRUPT:
         s->comm_receive_interrupt_mask = val;
-        printf("%s\n", "WROTE TO TRANSMIT INTERRUPT");
 
         break;
 
     case REG_OPTIONAL_HC:
         s->comm_optional_hc = val;
-        printf("%s\n", "WROTE TO HC");
 
         break;
     case REG_OPTIONAL_ERR1_C:
         s->comm_optional_err1_c = val;
-        printf("%s\n", "WROTE TO ERR1");
 
         break;
     case REG_OPTIONAL_ERR2_C:
         s->comm_optional_err2_c = val;
-        printf("%s\n", "WROTE TO ERR2");
 
         break;
 
@@ -407,7 +357,6 @@ static int comm_can_receive(void *opaque)
     if (s->comm_optional_hc) {
         return PACKET_LEN_WITH_HAMMING;
     }
-    printf("point comm_can_receive \n\n");
 
     return PACKET_LEN_STANDART;
 }
@@ -415,7 +364,6 @@ static int comm_can_receive(void *opaque)
 static void comm_receive(void *opaque, const uint8_t *data_char, int size)
 {
     comm_state *s = opaque;
-    printf("point comm_receive \n\n");
 
     if (s->comm_receive_CSR == COMM_CTRL_ES) {
         return;
@@ -423,7 +371,6 @@ static void comm_receive(void *opaque, const uint8_t *data_char, int size)
     s->comm_receive_internal_state = COMM_INTERNAL_STATE_RECEIVE_WRITE;
 
     comm_rx(s, data_char);
-    printf("ACTION \n\n");
 }
 
 void comm_change_address_space(comm_state *s, AddressSpace *addr_space,

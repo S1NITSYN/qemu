@@ -41,6 +41,9 @@
 #define BIT_INTERNAL_STATE_READ_SEND (0x1 << 23)
 #define BIT_INTERNAL_STATE_RECEIVE_WRITE (0x1 << 23)
 
+#define BIT_INTERRUPT_MASK_MIC 0x1
+#define BIT_INTERRUPT_MASK_MIE 0x2
+
 #define PACKET_LEN_STANDART 8
 #define PACKET_LEN_HAMMING (PACKET_LEN_STANDART + 3)
 
@@ -75,7 +78,9 @@ static void comm_tx(CommState *s)
         if (dma_read_result != MEMTX_OK) {
             s->comm_transmit_CSR = BIT_CSR_ES;
             s->comm_transmit_internal_state = BIT_INTERNAL_STATE_IDLE;
-            comm_update_irq(s);
+            if (!(s->comm_transmit_interrupt_mask & BIT_INTERRUPT_MASK_MIE)) {
+                comm_update_irq(s);
+            }
             return;
         }
 
@@ -88,7 +93,9 @@ static void comm_tx(CommState *s)
         !s->comm_transmit_main_counter) {
         s->comm_transmit_CSR = BIT_CSR_CPL;
         s->comm_transmit_internal_state = BIT_INTERNAL_STATE_COMPLETE;
-        comm_update_irq(s);
+        if (!(s->comm_transmit_interrupt_mask & BIT_INTERRUPT_MASK_MIC)) {
+            comm_update_irq(s);
+        }
     }
 }
 
@@ -102,7 +109,9 @@ static void comm_rx(CommState *s, const uint8_t *buffer)
     if (dma_write_result != MEMTX_OK) {
         s->comm_receive_CSR = BIT_CSR_ES;
         s->comm_receive_internal_state = BIT_INTERNAL_STATE_IDLE;
-        comm_update_irq(s);
+        if (!(s->comm_receive_interrupt_mask & BIT_INTERRUPT_MASK_MIE)) {
+            comm_update_irq(s);
+        }
         return;
     }
 
@@ -112,7 +121,9 @@ static void comm_rx(CommState *s, const uint8_t *buffer)
         !s->comm_receive_main_counter) {
         s->comm_receive_CSR = BIT_CSR_CPL;
         s->comm_receive_internal_state = BIT_INTERNAL_STATE_COMPLETE;
-        comm_update_irq(s);
+        if (!(s->comm_receive_interrupt_mask & BIT_INTERRUPT_MASK_MIC)) {
+            comm_update_irq(s);
+        }
     }
 }
 
@@ -255,6 +266,9 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 
     case REG_TRANSMIT_CSR:
         s->comm_transmit_CSR = val;
+        if (!(s->comm_transmit_CSR & (BIT_CSR_CPL | BIT_CSR_ES))) {
+            comm_update_irq(s); 
+        }
         if (s->comm_transmit_CSR != BIT_CSR_EN) {
             break;
         }
@@ -264,6 +278,9 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 
     case REG_RECEIVE_CSR:
         s->comm_receive_CSR = val;
+        if (!(s->comm_receive_CSR & (BIT_CSR_CPL | BIT_CSR_ES))) {
+            comm_update_irq(s);
+        }
         if (s->comm_receive_CSR != BIT_CSR_EN) {
             break;
         }

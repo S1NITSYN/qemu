@@ -1,13 +1,12 @@
 #include "qemu/osdep.h"
-#include "qapi/error.h"
-#include "hw/qdev-properties.h"
-#include "hw/qdev-properties-system.h"
-#include "hw/irq.h"
-#include "sysemu/dma.h"
-#include "hw/sysbus.h"
-#include "chardev/char-serial.h"
-
 #include "hw/comm-port/commport.h"
+#include "chardev/char-serial.h"
+#include "hw/irq.h"
+#include "hw/qdev-properties-system.h"
+#include "hw/qdev-properties.h"
+#include "hw/sysbus.h"
+#include "qapi/error.h"
+#include "sysemu/dma.h"
 
 #define REG_TRANSMIT_MAIN_COUNTER 0x0
 #define REG_TRANSMIT_CURR_ADDRESS 0x2
@@ -15,7 +14,7 @@
 #define REG_TRANSMIT_ROW_COUNTER 0x6
 #define REG_TRANSMIT_ADDRESSING_MODE 0x8
 #define REG_TRANSMIT_CSR 0xA
-#define REG_TRANSMIT_INTERRUPT 0xC
+#define REG_TRANSMIT_INTERRUPT_MASK 0xC
 #define REG_TRANSMIT_STATE 0xE
 
 #define REG_RECEIVE_MAIN_COUNTER 0x10
@@ -24,7 +23,7 @@
 #define REG_RECEIVE_ROW_COUNTER 0x16
 #define REG_RECEIVE_ADDRESSING_MODE 0x18
 #define REG_RECEIVE_CSR 0x1A
-#define REG_RECEIVE_INTERRUPT 0x1C
+#define REG_RECEIVE_INTERRUPT_MASK 0x1C
 #define REG_RECEIVE_STATE 0x1E
 
 #define REG_OPTIONAL_HC 0x20
@@ -44,8 +43,8 @@
 #define BIT_INTERRUPT_MASK_MIC 0x1
 #define BIT_INTERRUPT_MASK_MIE 0x2
 
-#define PACKET_LEN_STANDART 8
-#define PACKET_LEN_HAMMING (PACKET_LEN_STANDART + 3)
+#define PACKET_LEN_STANDARD 8
+#define PACKET_LEN_HAMMING (PACKET_LEN_STANDARD + 3)
 
 #define COM_MODE_PPC 1
 #define COM_MODE_NMC 2
@@ -53,39 +52,46 @@
 
 static void comm_update_irq(CommState *s)
 {
-    if (s->comm_transmit_CSR & (BIT_CSR_CPL | BIT_CSR_ES)) {
+    if ((!(s->comm_transmit_interrupt_mask & BIT_INTERRUPT_MASK_MIC) &&
+         (s->comm_transmit_CSR & BIT_CSR_CPL)) ||
+        (!(s->comm_transmit_interrupt_mask & BIT_INTERRUPT_MASK_MIE) &&
+         (s->comm_transmit_CSR & BIT_CSR_ES))) {
         qemu_irq_raise(s->irq0);
-    } else
+    } else {
         qemu_irq_lower(s->irq0);
-    if (s->comm_receive_CSR & (BIT_CSR_CPL | BIT_CSR_ES)) {
+    }
+
+    if ((!(s->comm_receive_interrupt_mask & BIT_INTERRUPT_MASK_MIC) &&
+         (s->comm_receive_CSR & BIT_CSR_CPL)) ||
+        (!(s->comm_receive_interrupt_mask & BIT_INTERRUPT_MASK_MIE) &&
+         (s->comm_receive_CSR & BIT_CSR_ES))) {
         qemu_irq_raise(s->irq1);
-    } else
+    } else {
         qemu_irq_lower(s->irq1);
+    }
 }
 
 static void comm_tx(CommState *s)
 {
     uint8_t sizeof_part =
-        (s->comm_optional_hc) ? PACKET_LEN_HAMMING : PACKET_LEN_STANDART;
+        (s->comm_optional_hc) ? PACKET_LEN_HAMMING : PACKET_LEN_STANDARD;
     uint8_t *buffer = malloc(sizeof_part * sizeof(uint8_t));
     uint8_t dma_read_result;
 
     for (int i = 0; i < s->comm_transmit_main_counter; i++) {
         dma_read_result =
             dma_memory_read(s->addr_space, s->comm_transmit_address, buffer,
-                            PACKET_LEN_STANDART, MEMTXATTRS_UNSPECIFIED);
+                            PACKET_LEN_STANDARD, MEMTXATTRS_UNSPECIFIED);
 
         if (dma_read_result != MEMTX_OK) {
             s->comm_transmit_CSR = BIT_CSR_ES;
             s->comm_transmit_internal_state = BIT_INTERNAL_STATE_IDLE;
-            if (!(s->comm_transmit_interrupt_mask & BIT_INTERRUPT_MASK_MIE)) {
-                comm_update_irq(s);
-            }
+            comm_update_irq(s);
             return;
         }
 
         qemu_chr_fe_write_all(&s->comm_chr, buffer, sizeof_part);
-        s->comm_transmit_address += PACKET_LEN_STANDART;
+        s->comm_transmit_address += PACKET_LEN_STANDARD;
     }
 
     s->comm_transmit_main_counter = 0;
@@ -93,9 +99,7 @@ static void comm_tx(CommState *s)
         !s->comm_transmit_main_counter) {
         s->comm_transmit_CSR = BIT_CSR_CPL;
         s->comm_transmit_internal_state = BIT_INTERNAL_STATE_COMPLETE;
-        if (!(s->comm_transmit_interrupt_mask & BIT_INTERRUPT_MASK_MIC)) {
-            comm_update_irq(s);
-        }
+        comm_update_irq(s);
     }
 }
 
@@ -104,26 +108,21 @@ static void comm_rx(CommState *s, const uint8_t *buffer)
     uint8_t dma_write_result;
     dma_write_result =
         dma_memory_write(s->addr_space, s->comm_receive_address, buffer,
-                         PACKET_LEN_STANDART, MEMTXATTRS_UNSPECIFIED);
+                         PACKET_LEN_STANDARD, MEMTXATTRS_UNSPECIFIED);
 
     if (dma_write_result != MEMTX_OK) {
         s->comm_receive_CSR = BIT_CSR_ES;
         s->comm_receive_internal_state = BIT_INTERNAL_STATE_IDLE;
-        if (!(s->comm_receive_interrupt_mask & BIT_INTERRUPT_MASK_MIE)) {
-            comm_update_irq(s);
-        }
+        comm_update_irq(s);
         return;
     }
 
-    s->comm_receive_address += PACKET_LEN_STANDART;
+    s->comm_receive_address += PACKET_LEN_STANDARD;
     s->comm_receive_main_counter--;
-    if ((s->comm_receive_CSR == BIT_CSR_EN) &&
-        !s->comm_receive_main_counter) {
+    if ((s->comm_receive_CSR == BIT_CSR_EN) && !s->comm_receive_main_counter) {
         s->comm_receive_CSR = BIT_CSR_CPL;
         s->comm_receive_internal_state = BIT_INTERNAL_STATE_COMPLETE;
-        if (!(s->comm_receive_interrupt_mask & BIT_INTERRUPT_MASK_MIC)) {
-            comm_update_irq(s);
-        }
+        comm_update_irq(s);
     }
 }
 
@@ -182,11 +181,11 @@ static uint64_t comm_read(void *opaque, hwaddr addr, unsigned size)
         val = s->comm_receive_CSR;
         break;
 
-    case REG_TRANSMIT_INTERRUPT:
+    case REG_TRANSMIT_INTERRUPT_MASK:
         val = s->comm_transmit_interrupt_mask;
         break;
 
-    case REG_RECEIVE_INTERRUPT:
+    case REG_RECEIVE_INTERRUPT_MASK:
         val = s->comm_receive_interrupt_mask;
         break;
 
@@ -232,12 +231,14 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 
     case REG_TRANSMIT_CURR_ADDRESS:
         s->comm_transmit_address = DROP_LAST_3BITS(
-            (s->registers_mode == COM_MODE_NMC) ? (val * sizeof(nmc_byte_t)) : val);
+            (s->registers_mode == COM_MODE_NMC) ? (val * sizeof(nmc_byte_t))
+                                                : val);
         break;
 
     case REG_RECEIVE_CURR_ADDRESS:
         s->comm_receive_address = DROP_LAST_3BITS(
-            (s->registers_mode == COM_MODE_NMC) ? (val * sizeof(nmc_byte_t)) : val);
+            (s->registers_mode == COM_MODE_NMC) ? (val * sizeof(nmc_byte_t))
+                                                : val);
         break;
 
     case REG_TRANSMIT_BIAS:
@@ -266,9 +267,7 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 
     case REG_TRANSMIT_CSR:
         s->comm_transmit_CSR = val;
-        if (!(s->comm_transmit_CSR & (BIT_CSR_CPL | BIT_CSR_ES))) {
-            comm_update_irq(s); 
-        }
+        comm_update_irq(s);
         if (s->comm_transmit_CSR != BIT_CSR_EN) {
             break;
         }
@@ -278,21 +277,21 @@ static void comm_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 
     case REG_RECEIVE_CSR:
         s->comm_receive_CSR = val;
-        if (!(s->comm_receive_CSR & (BIT_CSR_CPL | BIT_CSR_ES))) {
-            comm_update_irq(s);
-        }
+        comm_update_irq(s);
         if (s->comm_receive_CSR != BIT_CSR_EN) {
             break;
         }
         qemu_chr_fe_accept_input(&s->comm_chr);
         break;
 
-    case REG_TRANSMIT_INTERRUPT:
+    case REG_TRANSMIT_INTERRUPT_MASK:
         s->comm_transmit_interrupt_mask = val;
+        comm_update_irq(s);
         break;
 
-    case REG_RECEIVE_INTERRUPT:
+    case REG_RECEIVE_INTERRUPT_MASK:
         s->comm_receive_interrupt_mask = val;
+        comm_update_irq(s);
         break;
 
     case REG_OPTIONAL_HC:
@@ -354,7 +353,7 @@ static int comm_can_receive(void *opaque)
         return PACKET_LEN_HAMMING;
     }
 
-    return PACKET_LEN_STANDART;
+    return PACKET_LEN_STANDARD;
 }
 
 static void comm_receive(void *opaque, const uint8_t *data_char, int size)
@@ -381,8 +380,10 @@ void comm_change_address_space(CommState *s, AddressSpace *addr_space,
 
 static Property comm_properties[] = {
     DEFINE_PROP_CHR("CommChardev", CommState, comm_chr),
+/* RegistersMode property depending on which board or emulator is using:
+COM_MODE_PPC - 1, COM_MODE_NMC - 2. */
     DEFINE_PROP_UINT8("RegistersMode", CommState, registers_mode,
-                      0),  // COM_MODE_PPC - 1, COM_MODE_NMC - 2
+                      0),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -407,9 +408,7 @@ static void comm_class_init(ObjectClass *oc, void *data)
 
     dc->reset = comm_reset;
     dc->realize = comm_realize;
-    dc->desc =
-        "Communication port for data exchange with the NeuroMatrix "
-        "architecture neuroprocessor";
+    dc->desc = "NMC communication port";
     device_class_set_props(dc, comm_properties);
 }
 

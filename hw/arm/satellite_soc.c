@@ -9,6 +9,143 @@
 #include "hw/misc/unimp.h"
 #include "sysemu/sysemu.h"
 #include "qemu/units.h"
+#include "hw/ssi/pl022.h"
+
+#define REG_MASK                0xFFFF
+#define REG_EXTMEM_CTRL         0x0
+#define REG_EXTMEM2_CTRL        0x30
+#define REG_EXTMEM3_CTRL        0x34
+#define REG_EXTMEM4_CTRL        0x38
+#define REG_DMA_INTR_FLAGS      0x70
+#define REG_ALT_FUNCTION_CTRL   0x74 // - 0x94
+#define REG_ALIAS_CTRL          0xAC
+#define REG_GLOBAL_RESET        0xBC
+
+#define INTERNAL_BANK_CNT       2
+#define INTERNAL_BANK_SIZE      8 * 8 * KiB
+#define EXTERNAL_BANK_CNT       4
+#define EXTERNAL_BANK_SIZE      2 * 8 * MiB
+
+#define ALIAS_CTRL_VALUES_NUM   8
+#define ALIAS_CTRL_MAX_VALUE    0xC
+
+static void SATELLITE_reset(DeviceState *dev);
+
+static uint64_t SATELLITE_read(void *opaque, hwaddr addr, unsigned int size)
+{
+    SATELLITEState *s = opaque;
+    uint64_t val = 0;
+
+    addr &= REG_MASK;
+    switch (addr) {
+    case REG_EXTMEM_CTRL:
+        val = s->external_memory_ctrl1;
+        printf("%s\n", "EBOLDA\n\n");
+        break;
+    case REG_EXTMEM2_CTRL:
+        val = s->external_memory_ctrl2;
+        break;
+    case REG_EXTMEM3_CTRL:
+        val = s->external_memory_ctrl3;
+        break;
+    case REG_EXTMEM4_CTRL:
+        val = s->external_memory_ctrl4;
+        break;
+    case REG_DMA_INTR_FLAGS:
+        val = s->dma_internal_flags;
+        break;
+    case REG_ALT_FUNCTION_CTRL:
+        val = s->gpio_alt_func_ctrl;
+        break;
+    case REG_ALIAS_CTRL:
+        val = s->alias_ctrl;
+        break;
+    case REG_GLOBAL_RESET:
+        val = s->global_reset;
+        break;
+    default:
+        break;
+    }
+
+    return val;
+}
+
+static void SATELLITE_write(void *opaque, hwaddr addr, uint64_t val,
+                        unsigned int size)
+{
+    SATELLITEState *s = opaque;
+
+    addr &= REG_MASK;
+    switch (addr) {
+    case REG_EXTMEM_CTRL:
+        s->external_memory_ctrl1 = val;
+        break;
+    case REG_EXTMEM2_CTRL:
+        s->external_memory_ctrl2 = val;
+        break;
+    case REG_EXTMEM3_CTRL:
+        s->external_memory_ctrl3 = val;
+        break;
+    case REG_EXTMEM4_CTRL:
+        s->external_memory_ctrl4 = val;
+        break;
+    case REG_DMA_INTR_FLAGS:
+        s->dma_internal_flags = val;
+        break;
+    case REG_ALT_FUNCTION_CTRL:
+        s->gpio_alt_func_ctrl = val;
+        break;
+    case REG_ALIAS_CTRL: //переписать этот case
+        s->alias_ctrl = val;
+
+        if (val > ALIAS_CTRL_MAX_VALUE) {
+            break;
+        }
+
+        uint32_t index = val;
+        if (val > 3) {
+            index = (index >> 2) + 4;
+        }
+        memory_region_set_enabled(s->aliases.region[s->aliases.last_opened_reg], false);
+        memory_region_set_enabled(s->aliases.region[index], true);
+        s->aliases.last_opened_reg = index;
+        break;
+
+    case REG_GLOBAL_RESET:
+        s->global_reset = val;
+        if (val) {
+            SATELLITE_reset(opaque);
+            return;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps SATELLITE_ops = {
+    .read = SATELLITE_read,
+    .write = SATELLITE_write
+};
+
+static void SATELLITE_reset(DeviceState *dev)
+{
+    SATELLITEState *s = SATELLITE_SOC(dev);
+
+    s->external_memory_ctrl1 = 0x1FF;
+    s->external_memory_ctrl2 = 0x1FF;
+    s->external_memory_ctrl3 = 0x1FF;
+    s->external_memory_ctrl4 = 0x1FF;
+    s->dma_internal_flags = 0;
+    s->gpio_alt_func_ctrl = 0;
+    s->alias_ctrl = 0;
+    s->global_reset = 0;
+
+    memory_region_set_enabled(s->aliases.region[s->aliases.last_opened_reg], false);
+    memory_region_set_enabled(s->aliases.region[4], true);
+    s->aliases.last_opened_reg = 4;
+    //TODO: make it easier
+}
 
 static void SATELLITE_soc_initfn(Object *obj)
 {
@@ -41,48 +178,63 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
     clock_set_mul_div(s->refclk, 8, 1);
     clock_set_source(s->refclk, s->sysclk);
 
-    const uint32_t EXTERNAL_BANK_SIZE = 2 * 8 * MiB;
+    for (uint32_t i = 0; i < EXTERNAL_BANK_CNT; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "ChipSelect%u", i);
 
-    MemoryRegion *emu1 = g_new(MemoryRegion, 1);
-    memory_region_init_ram(emu1, NULL, "ChipSelect1", EXTERNAL_BANK_SIZE,
-                           &error_fatal);
-    memory_region_add_subregion(system_memory, 0x8000000 + EXTERNAL_BANK_SIZE * 0,
-                                emu1);
+        s->external_mem[i] = g_new(MemoryRegion, 1);
+        memory_region_init_ram(s->external_mem[i], NULL, name, EXTERNAL_BANK_SIZE,
+                               &error_fatal);
+        memory_region_add_subregion(system_memory, 0x8000000 + EXTERNAL_BANK_SIZE * i,
+                                    s->external_mem[i]);
+    }
 
-    MemoryRegion *emu2 = g_new(MemoryRegion, 1);
-    memory_region_init_ram(emu2, NULL, "ChipSelect2", EXTERNAL_BANK_SIZE,
-                           &error_fatal);
-    memory_region_add_subregion(system_memory, 0x8000000 + EXTERNAL_BANK_SIZE * 1,
-                                emu2);
-
-    MemoryRegion *emu3 = g_new(MemoryRegion, 1);
-    memory_region_init_ram(emu3, NULL, "ChipSelect3", EXTERNAL_BANK_SIZE,
-                           &error_fatal);
-    memory_region_add_subregion(system_memory, 0x8000000 + EXTERNAL_BANK_SIZE * 2,
-                                emu3);
-
-    MemoryRegion *emu4 = g_new(MemoryRegion, 1);
-    memory_region_init_ram(emu4, NULL, "ChipSelect4", EXTERNAL_BANK_SIZE,
-                           &error_fatal);
-    memory_region_add_subregion(system_memory, 0x8000000 + EXTERNAL_BANK_SIZE * 3,
-                                emu4);
-
-    MemoryRegion *ALIASING = g_new(MemoryRegion, 1);
-    memory_region_init_alias(ALIASING, NULL, "ALIASING", emu1, 0, EXTERNAL_BANK_SIZE);
-    memory_region_add_subregion(system_memory, 0x0, ALIASING);
-    
-    const uint32_t INTERNAL_BANKS_CNT = 2;
-    const uint32_t INTERNAL_BANK_SIZE = 8 * 8 * KiB;
-    for (uint32_t i = 0; i < INTERNAL_BANKS_CNT; i++) {
+    for (uint32_t i = 0; i < INTERNAL_BANK_CNT; i++) {
         char name[32];
         snprintf(name, sizeof(name), "IMU%u", i);
 
-        MemoryRegion *imu = g_new(MemoryRegion, 1);
-        memory_region_init_ram(imu, NULL, name, INTERNAL_BANK_SIZE,
+        s->internal_mem[i] = g_new(MemoryRegion, 1);
+        memory_region_init_ram(s->internal_mem[i], NULL, name, INTERNAL_BANK_SIZE,
                                &error_fatal);
         memory_region_add_subregion(system_memory, 0x20000000 + INTERNAL_BANK_SIZE * i,
-                                    imu);
+                                    s->internal_mem[i]);
     }
+
+    for (uint32_t i = 0; i < (ALIAS_CTRL_VALUES_NUM - 1); i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "ALIASING%u", i);
+        MemoryRegion* current_mem_reg;
+        uint32_t mem_size;
+
+        s->aliases.region[i] = g_new(MemoryRegion, 1);
+        if (i < 2) {
+            current_mem_reg = s->internal_mem[i];
+            mem_size = INTERNAL_BANK_SIZE;
+        } else if (i == 2) {
+            current_mem_reg = s->internal_mem[0];
+            mem_size = INTERNAL_BANK_SIZE * 2 + 1;
+        } else {
+            current_mem_reg = s->external_mem[i - 3];
+            mem_size = EXTERNAL_BANK_SIZE;
+        }
+        memory_region_init_alias(s->aliases.region[i], NULL, name, current_mem_reg, 0x0, mem_size);
+        memory_region_add_subregion_overlap(system_memory, 0x0, s->aliases.region[i], 0);
+        memory_region_set_enabled(s->aliases.region[i], false);
+    }
+
+#if 0
+    memory_region_init_rom(&s->flash, OBJECT(dev_soc), "SATELLITE.flash",
+                           FLASH_SIZE, &error_fatal);
+    memory_region_init_alias(&s->flash_alias, OBJECT(dev_soc),
+                             "SATELLITE.flash.alias", &s->flash, 0, FLASH_SIZE);
+    memory_region_add_subregion(system_memory, FLASH_BASE_ADDRESS, &s->flash);
+    memory_region_add_subregion(system_memory, 0, &s->flash_alias);
+
+
+    memory_region_init_ram(&s->sram, NULL, "SATELLITE.sram", SRAM_SIZE,
+                           &error_fatal);
+    memory_region_add_subregion(system_memory, SRAM_BASE_ADDRESS, &s->sram);
+#endif
 
     /* Init cpu */
     cpu = DEVICE(&s->cpu);
@@ -92,18 +244,16 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
     qdev_connect_clock_in(cpu, "cpuclk", s->sysclk);
     qdev_connect_clock_in(cpu, "refclk", s->refclk);
     object_property_set_link(OBJECT(&s->cpu), "memory",
-                             OBJECT(get_system_memory()), &error_abort);
+                             OBJECT(system_memory), &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->cpu), errp)) {
         return;
     }
 
-    //create_unimplemented_device("aliasing??",  0x00000000, 0xFFFFFF);
-    //create_unimplemented_device("chip_select1",  0x8000000, 0xFFFFFF);
-    create_unimplemented_device("chip_select2",  0x9000000, 0xFFFFFF);
-    create_unimplemented_device("chip_select3",  0xA000000, 0xFFFFFF);
-    create_unimplemented_device("chip_select4",  0xB000000, 0xFFFFFF);
-    //create_unimplemented_device("imu1", 0x20000000, 0xFFFF);
-    //create_unimplemented_device("imu2", 0x20010000, 0xFFFF);
+    s->iomem = g_new(MemoryRegion, 1);
+    memory_region_init_io(s->iomem, NULL, &SATELLITE_ops, s,
+                          "SATELLITE_iomem", 0x10000);
+    memory_region_add_subregion(system_memory, 0xA0000000, s->iomem);
+
     create_unimplemented_device("GPIOA", 0x80010000, 0xFFF);
     create_unimplemented_device("GPIOB", 0x80020000, 0xFFF);
     create_unimplemented_device("GPIOC", 0x80030000, 0xFFF);
@@ -150,6 +300,7 @@ static void SATELLITE_soc_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = SATELLITE_soc_realize;
+    dc->reset = SATELLITE_reset;
     device_class_set_props(dc, SATELLITE_soc_properties);
 }
 

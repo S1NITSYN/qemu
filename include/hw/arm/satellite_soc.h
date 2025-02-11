@@ -19,6 +19,11 @@ OBJECT_DECLARE_SIMPLE_TYPE(SATELLITEState, SATELLITE_SOC)
 #define SRAM_BASE_ADDRESS 0x20000000
 #define SRAM_SIZE (8 * 1024)
 
+typedef struct Memory_aliases_t {
+    MemoryRegion* region[7];
+    uint8_t last_opened_reg;    
+} Memory_aliases_t;
+
 struct SATELLITEState {
     /*< private >*/
     SysBusDevice parent_obj;
@@ -28,13 +33,19 @@ struct SATELLITEState {
 
     ARMv7MState cpu;
 
-    /*STM32F2XXUsartState usart[STM_NUM_USARTS];
-    STM32F2XXSPIState spi[STM_NUM_SPIS];*/
-    //SerialState uart[6];
+    uint32_t external_memory_ctrl1;
+    uint32_t external_memory_ctrl2;
+    uint32_t external_memory_ctrl3;
+    uint32_t external_memory_ctrl4;
+    uint32_t dma_internal_flags;
+    uint32_t gpio_alt_func_ctrl;
+    uint32_t alias_ctrl;
+    uint32_t global_reset;
 
-    MemoryRegion sram;
-    MemoryRegion flash;
-    MemoryRegion flash_alias;
+    MemoryRegion* iomem;
+    MemoryRegion* external_mem[4];
+    Memory_aliases_t aliases;
+    MemoryRegion* internal_mem[2];
 
     Clock *sysclk;
     Clock *refclk;

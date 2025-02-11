@@ -10,12 +10,18 @@
 #include "sysemu/sysemu.h"
 #include "qemu/units.h"
 #include "hw/ssi/pl022.h"
+#include "hw/char/pl011.h"
+#include "hw/watchdog/cmsdk-apb-watchdog.h"
+#include "hw/timer/cmsdk-apb-timer.h"
+#include "hw/arm/irqmux.h"
 
 #define REG_MASK                0xFFFF
 #define REG_EXTMEM_CTRL         0x0
 #define REG_EXTMEM2_CTRL        0x30
 #define REG_EXTMEM3_CTRL        0x34
 #define REG_EXTMEM4_CTRL        0x38
+#define REG_PWR_CTRL_CLK        0x28
+#define REG_PWR_CTRL_RST        0x2C
 #define REG_DMA_INTR_FLAGS      0x70
 #define REG_ALT_FUNCTION_CTRL   0x74 // - 0x94
 #define REG_ALIAS_CTRL          0xAC
@@ -50,6 +56,12 @@ static uint64_t SATELLITE_read(void *opaque, hwaddr addr, unsigned int size)
         break;
     case REG_EXTMEM4_CTRL:
         val = s->external_memory_ctrl4;
+        break;
+    case REG_PWR_CTRL_CLK:
+        val = s->pwr_ctrl_clk;
+        break;
+    case REG_PWR_CTRL_RST:
+        val = s->pwr_ctrl_rst;
         break;
     case REG_DMA_INTR_FLAGS:
         val = s->dma_internal_flags;
@@ -88,6 +100,12 @@ static void SATELLITE_write(void *opaque, hwaddr addr, uint64_t val,
         break;
     case REG_EXTMEM4_CTRL:
         s->external_memory_ctrl4 = val;
+        break;
+    case REG_PWR_CTRL_CLK:
+        s->pwr_ctrl_clk = val;
+        break;
+    case REG_PWR_CTRL_RST:
+        s->pwr_ctrl_rst = val;
         break;
     case REG_DMA_INTR_FLAGS:
         s->dma_internal_flags = val;
@@ -149,9 +167,35 @@ static void SATELLITE_reset(DeviceState *dev)
 
 static void SATELLITE_soc_initfn(Object *obj)
 {
+    char name[32];
+    uint32_t i;
+
     SATELLITEState *s = SATELLITE_SOC(obj);
 
     object_initialize_child(obj, "armv6m", &s->cpu, TYPE_ARMV7M);
+
+    object_initialize_child(obj, "irqmux", &s->multiplexer, TYPE_IRQMUX);
+
+    object_initialize_child(obj, "spi0", &s->spi[0], TYPE_PL022);
+    object_initialize_child(obj, "spi1", &s->spi[1], TYPE_PL022);
+
+    for (i = 0; i < 6; i++) {
+        snprintf(name, sizeof(name), "uart%u", i);
+        if (serial_hd(i)) {
+            object_initialize_child(obj, name, &s->uart[i], TYPE_PL011);
+        } else {
+            //continue;
+            break;
+        }
+    }
+
+    for (i = 0; i < 4; i++) {
+        snprintf(name, sizeof(name), "timer%u", i);
+        object_initialize_child(obj, name, &s->timer[i],
+                                TYPE_CMSDK_APB_TIMER);
+    }
+
+    object_initialize_child(obj, "watchdog", &s->watchdog, TYPE_CMSDK_APB_WATCHDOG);
 
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
     s->refclk = qdev_init_clock_in(DEVICE(s), "refclk", NULL, NULL, 0);
@@ -161,6 +205,7 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
 {
     SATELLITEState *s = SATELLITE_SOC(dev_soc);
     DeviceState *cpu;
+    SysBusDevice *busdev;
 
     MemoryRegion *system_memory = get_system_memory();
 
@@ -222,20 +267,6 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
         memory_region_set_enabled(s->aliases.region[i], false);
     }
 
-#if 0
-    memory_region_init_rom(&s->flash, OBJECT(dev_soc), "SATELLITE.flash",
-                           FLASH_SIZE, &error_fatal);
-    memory_region_init_alias(&s->flash_alias, OBJECT(dev_soc),
-                             "SATELLITE.flash.alias", &s->flash, 0, FLASH_SIZE);
-    memory_region_add_subregion(system_memory, FLASH_BASE_ADDRESS, &s->flash);
-    memory_region_add_subregion(system_memory, 0, &s->flash_alias);
-
-
-    memory_region_init_ram(&s->sram, NULL, "SATELLITE.sram", SRAM_SIZE,
-                           &error_fatal);
-    memory_region_add_subregion(system_memory, SRAM_BASE_ADDRESS, &s->sram);
-#endif
-
     /* Init cpu */
     cpu = DEVICE(&s->cpu);
     qdev_prop_set_uint32(cpu, "num-irq", 32);
@@ -254,40 +285,130 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
                           "SATELLITE_iomem", 0x10000);
     memory_region_add_subregion(system_memory, 0xA0000000, s->iomem);
 
-    create_unimplemented_device("GPIOA", 0x80010000, 0xFFF);
-    create_unimplemented_device("GPIOB", 0x80020000, 0xFFF);
-    create_unimplemented_device("GPIOC", 0x80030000, 0xFFF);
-    create_unimplemented_device("GPIOD", 0x80040000, 0xFFF);
-    create_unimplemented_device("GPIOE", 0x80050000, 0xFFF);
-    create_unimplemented_device("GPIOF", 0x80060000, 0xFFF);
-    create_unimplemented_device("GPIOG", 0x80070000, 0xFFF);
-    create_unimplemented_device("GPIOH", 0x80080000, 0xFFF);
-    create_unimplemented_device("GPIOI", 0x80090000, 0xFFF);
-    //create_unimplemented_device("general_purpose_registers", 0xA0000000, 0xFFFF);       ??
-    //create_unimplemented_device("DMAC", 0xA0010000, 0xFFF);       ??
-    create_unimplemented_device("SPI1", 0xA0020000, 0xFFF);
-    create_unimplemented_device("SPI2", 0xA0030000, 0xFFF);
-    create_unimplemented_device("UART1", 0xA0040000, 0xFFF);
-    create_unimplemented_device("UART2", 0xA0050000, 0xFFF);
-    create_unimplemented_device("UART3", 0xA0060000, 0xFFF);
-    create_unimplemented_device("UART4", 0xA0070000, 0xFFF);
-    create_unimplemented_device("watchdog", 0xA0080000, 0xFFF);
-    create_unimplemented_device("timer1",  0xA0090000, 0xFFF);
-    create_unimplemented_device("timer2", 0xA0130000, 0xFFFF);
-    create_unimplemented_device("timer3", 0xA0140000, 0xFFFF);
-    create_unimplemented_device("timer4", 0xA0150000, 0xFFFF);
-    create_unimplemented_device("CAN1", 0xA01B0000, 0xFFFF);
-    create_unimplemented_device("CAN2", 0xA01C0000, 0xFFFF);
-    //create_unimplemented_device("IRQ_multiplexer", 0xA01D0000, 0xFFFF);       ??
-    create_unimplemented_device("UART5", 0xA01E0000, 0xFFFF);
-    create_unimplemented_device("UART6", 0xA01F0000, 0xFFFF);
-    //create_unimplemented_device("I2C", 0xA0200000, 0xFFFF);       ??
-    create_unimplemented_device("test_access_to_mem1_data", 0x60000000, 0xFFFF);
-    create_unimplemented_device("test_access_to_mem1_ECC", 0x60100000, 0xFFFF);
-    create_unimplemented_device("test_access_to_cacheWay1_data", 0x61000000, 0x3FFF);
-    create_unimplemented_device("test_access_to_cacheWay1TarCrc", 0x61100000, 0x3FFF);
-    create_unimplemented_device("test_access_to_mem2_data", 0x62000000, 0xFFFF);
-    create_unimplemented_device("test_access_to_mem2_ECC", 0x62100000, 0xFFFF);
+    busdev = SYS_BUS_DEVICE(&s->multiplexer);
+    if (!sysbus_realize(busdev, &error_fatal)) {
+        return;
+    }
+    memory_region_add_subregion(system_memory, 0xA01D0000,
+                                sysbus_mmio_get_region(busdev, 0));
+    for (uint32_t i = 0; i < LINE_MAX_NUM; i++) {
+        qdev_connect_gpio_out(DEVICE(&s->multiplexer), i, qdev_get_gpio_in(cpu, i)); //не помню второй параметр
+    }
+
+    busdev = SYS_BUS_DEVICE(&s->spi[0]);
+    if (!sysbus_realize(busdev, &error_fatal)) {
+        return;
+    }
+    memory_region_add_subregion(system_memory, 0xA0020000,
+                                sysbus_mmio_get_region(busdev, 0));
+    sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 32));
+
+#if 0
+    DriveInfo *dinfo = drive_get(IF_MTD, 0, 0);
+    if (dinfo) {
+        DeviceState *flash_dev;
+        struct BlockBackend *blk = blk_by_legacy_dinfo(dinfo);
+
+        switch (blk_getlength(blk)) {
+        default:
+        case 4 * MiB:
+            flash_dev = qdev_new("m25p32");
+            break;
+
+        case 16 * MiB:
+            flash_dev = qdev_new("n25q128a13");
+            break;
+        }
+
+        qdev_prop_set_drive_err(flash_dev, "drive", blk, &error_fatal);
+
+        // Our flash has 1 dummy cycle (or at least with this value it works)
+        // So we take default value and set dummy cycles to 1
+        object_property_set_int(OBJECT(flash_dev), "nonvolatile-cfg", 0x1fff,
+                                &error_fatal);
+        qdev_realize(flash_dev, BUS(s->spi[0].ssi), &error_fatal);
+
+        // Connect spi_flash chip select (cs pin) to 2nd pin of gpio1
+        qdev_connect_gpio_out(s->lsif1_gpio[1], 2,
+                              qdev_get_gpio_in_named(flash_dev, SSI_GPIO_CS, 0));
+    }
+#endif
+
+    busdev = SYS_BUS_DEVICE(&s->spi[1]);
+    if (!sysbus_realize(busdev, &error_fatal)) {
+        return;
+    }
+    memory_region_add_subregion(system_memory, 0xA0030000,
+                                sysbus_mmio_get_region(busdev, 0));
+    sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 33));
+
+    for (uint32_t i = 0; i < 6; i++) {
+        uint32_t device_address;
+
+        if (serial_hd(i) && (i < 4)) {
+            device_address = 0xA0040000 + i * 0x10000;
+        } else if (serial_hd(i)) {
+            device_address = 0xA01E0000 + (i - 4) * 0x10000;
+        } else {
+            break;
+        }
+        qdev_prop_set_chr(DEVICE(&s->uart[i]), "chardev", serial_hd(i));
+        busdev = SYS_BUS_DEVICE(&s->uart[i]);
+        if (!sysbus_realize(busdev, &error_fatal)) {
+            return;
+        }
+        memory_region_add_subregion(system_memory, device_address,
+                                    sysbus_mmio_get_region(busdev, 0));
+        sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 24 + i));
+    }
+
+    for (uint32_t i = 0; i < 4; i++) {
+        uint32_t device_address = 0xA0090000;
+        if (i > 0) {
+            device_address = 0xA0120000 + 0x10000 * i;
+        }
+
+        busdev = SYS_BUS_DEVICE(&s->timer[i]);
+        qdev_connect_clock_in(DEVICE(&s->timer[i]), "pclk", s->sysclk);
+        if (!sysbus_realize_and_unref(busdev, &error_fatal)) {
+            return;
+        }
+        memory_region_add_subregion(system_memory, device_address,
+                                    sysbus_mmio_get_region(busdev, 0));
+        sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 1 + i));
+    }
+    
+    qdev_connect_clock_in(DEVICE(&s->watchdog), "WDOGCLK", s->sysclk);
+    busdev = SYS_BUS_DEVICE(&s->watchdog);
+    if (!sysbus_realize(busdev, &error_fatal)) {
+        return;
+    }
+    memory_region_add_subregion(system_memory, 0xA0080000,
+                                    sysbus_mmio_get_region(busdev, 0));
+    sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 0));
+
+    create_unimplemented_device("GPIOA", 0x80010000, 0x10000);
+    create_unimplemented_device("GPIOB", 0x80020000, 0x10000);
+    create_unimplemented_device("GPIOC", 0x80030000, 0x10000);
+    create_unimplemented_device("GPIOD", 0x80040000, 0x10000);
+    create_unimplemented_device("GPIOE", 0x80050000, 0x10000);
+    create_unimplemented_device("GPIOF", 0x80060000, 0x10000);
+    create_unimplemented_device("GPIOG", 0x80070000, 0x10000);
+    create_unimplemented_device("GPIOH", 0x80080000, 0x10000);
+    create_unimplemented_device("GPIOI", 0x80090000, 0x10000);
+    //create_unimplemented_device("general_purpose_registers", 0xA0000000, 0x10000);       ??
+    //create_unimplemented_device("DMAC", 0xA0010000, 0x1000);       ??
+    create_unimplemented_device("CAN1", 0xA01B0000, 0x10000);
+    create_unimplemented_device("CAN2", 0xA01C0000, 0x10000);
+    //create_unimplemented_device("I2C", 0xA0200000, 0x10000);       ??
+    create_unimplemented_device("test_access_to_mem1_data", 0x60000000, 0x10000);
+    create_unimplemented_device("test_access_to_mem1_ECC", 0x60100000, 0x10000);
+    create_unimplemented_device("test_access_to_cacheWay1_data", 0x61000000, 0x4000);
+    create_unimplemented_device("test_access_to_cacheWay1TarCrc", 0x61100000, 0x4000);
+    create_unimplemented_device("test_access_to_mem2_data", 0x62000000, 0x10000);
+    create_unimplemented_device("test_access_to_mem2_ECC", 0x62100000, 0x10000);
+
+    printf("%s\n", "ALL PASSED");
 }
 
 static Property SATELLITE_soc_properties[] = {

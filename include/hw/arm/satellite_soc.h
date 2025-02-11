@@ -7,6 +7,11 @@
 #include "qom/object.h"
 #include "hw/clock.h"
 #include "hw/char/serial.h"
+#include "hw/ssi/pl022.h"
+#include "hw/char/pl011.h"
+#include "hw/watchdog/cmsdk-apb-watchdog.h"
+#include "hw/timer/cmsdk-apb-timer.h"
+#include "hw/arm/irqmux.h"
 
 #define TYPE_SATELLITE_SOC "satellite-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(SATELLITEState, SATELLITE_SOC)
@@ -33,19 +38,31 @@ struct SATELLITEState {
 
     ARMv7MState cpu;
 
+    Memory_aliases_t aliases;
+    MemoryRegion* external_mem[4];
+    MemoryRegion* internal_mem[2];
+
+    MemoryRegion* iomem;
     uint32_t external_memory_ctrl1;
     uint32_t external_memory_ctrl2;
     uint32_t external_memory_ctrl3;
     uint32_t external_memory_ctrl4;
+    uint32_t pwr_ctrl_clk;
+    uint32_t pwr_ctrl_rst;
     uint32_t dma_internal_flags;
     uint32_t gpio_alt_func_ctrl;
     uint32_t alias_ctrl;
     uint32_t global_reset;
 
-    MemoryRegion* iomem;
-    MemoryRegion* external_mem[4];
-    Memory_aliases_t aliases;
-    MemoryRegion* internal_mem[2];
+    //gpio
+    //dma
+    struct PL022State spi[2];
+    PL011State uart[6];
+    CMSDKAPBWatchdog watchdog;
+    CMSDKAPBTimer timer[4];
+    //can`s
+    IRQMUXState multiplexer;
+    //i2c ??
 
     Clock *sysclk;
     Clock *refclk;

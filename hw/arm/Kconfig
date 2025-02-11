@@ -448,9 +448,17 @@ config STM32F405_SOC
     select STM32F4XX_SYSCFG
     select STM32F4XX_EXTI
 
+config IRQMUX
+    bool
+
 config SATELLITE_SOC
     bool
     select ARM_V7M
+    select PL011 # UART
+    select PL022 # SPI
+    select CMSDK_APB_TIMER
+    select CMSDK_APB_WATCHDOG
+    select IRQMUX
 
 config XLNX_ZYNQMP_ARM
     bool

@@ -459,6 +459,7 @@ config SATELLITE_SOC
     select CMSDK_APB_TIMER
     select CMSDK_APB_WATCHDOG
     select IRQMUX
+    select CMSDK_AHB_GPIO
 
 config XLNX_ZYNQMP_ARM
     bool

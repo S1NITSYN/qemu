@@ -14,6 +14,7 @@
 #include "hw/watchdog/cmsdk-apb-watchdog.h"
 #include "hw/timer/cmsdk-apb-timer.h"
 #include "hw/arm/irqmux.h"
+#include "hw/gpio/cmsdk-ahb-gpio.h"
 
 #define REG_MASK                0xFFFF
 #define REG_EXTMEM_CTRL         0x0
@@ -179,6 +180,12 @@ static void SATELLITE_soc_initfn(Object *obj)
     object_initialize_child(obj, "spi0", &s->spi[0], TYPE_PL022);
     object_initialize_child(obj, "spi1", &s->spi[1], TYPE_PL022);
 
+    for (i = 0; i < 9; i++) {
+        snprintf(name, sizeof(name), "gpio%u", i);
+        object_initialize_child(obj, name, &s->gpio[i],
+                                TYPE_CMSDKAHB_GPIO);
+    }
+
     for (i = 0; i < 6; i++) {
         snprintf(name, sizeof(name), "uart%u", i);
         if (serial_hd(i)) {
@@ -293,6 +300,17 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
                                 sysbus_mmio_get_region(busdev, 0));
     for (uint32_t i = 0; i < LINE_MAX_NUM; i++) {
         qdev_connect_gpio_out(DEVICE(&s->multiplexer), i, qdev_get_gpio_in(cpu, i)); //не помню второй параметр
+    }
+
+
+    for (uint32_t i = 0; i < 9; i++) {
+        busdev = SYS_BUS_DEVICE(&s->gpio[i]);
+        if (!sysbus_realize(busdev, &error_fatal)) {
+            return;
+        }
+        memory_region_add_subregion(system_memory, 0x80000000 + i * 0x10000,
+                                    sysbus_mmio_get_region(busdev, 0));
+        //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 24 + i));
     }
 
     busdev = SYS_BUS_DEVICE(&s->spi[0]);

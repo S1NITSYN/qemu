@@ -12,13 +12,14 @@
 #include "hw/watchdog/cmsdk-apb-watchdog.h"
 #include "hw/timer/cmsdk-apb-timer.h"
 #include "hw/arm/irqmux.h"
+#include "hw/gpio/cmsdk-ahb-gpio.h"
 
 #define TYPE_SATELLITE_SOC "satellite-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(SATELLITEState, SATELLITE_SOC)
 
 #define STM_NUM_USARTS 3
 #define STM_NUM_SPIS 2
-
+    
 #define FLASH_BASE_ADDRESS 0x08000000
 #define FLASH_SIZE (128 * 1024)
 #define SRAM_BASE_ADDRESS 0x20000000
@@ -54,7 +55,7 @@ struct SATELLITEState {
     uint32_t alias_ctrl;
     uint32_t global_reset;
 
-    //gpio
+    CMSDKAHB_GPIOState gpio[9];
     //dma
     struct PL022State spi[2];
     PL011State uart[6];

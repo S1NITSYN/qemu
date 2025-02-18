@@ -23,12 +23,62 @@
 #define MASKLOWBYTE		0x400// ... 0x7FC)
 #define MASKHIGHBYTE	0x800// ... 0xBFC)
 
+static void CMSDKAHB_GPIO_update_int(CMSDKAHB_GPIOState *s)
+{
+	int i;
+	for (i = 0; i < CMSDKAHB_GPIO_PIN_COUNT; i++) {
+		if (!extract32(s->intstatus, i, 1)) {
+			qemu_set_irq(s->irqs[i], 0);
+		} else if (extract32(s->inttype, i, 1)) {
+			qemu_irq_pulse(s->irqs[i]);
+			s->intstatus = deposit32(s->intstatus, i, 1, 0);
+		} else {
+			qemu_set_irq(s->irqs[i], 1);
+		}
+	}
+}
+
+static void CMSDKAHB_GPIO_set_int_line(CMSDKAHB_GPIOState *s, int line, uint8_t level)
+{
+	if (!extract32(s->inten, line, 1)) {
+		return;
+	}
+	uint32_t polarity = extract32(s->intpol, line, 1);
+	uint32_t type = extract32(s->inttype, line, 1);
+
+	if ((polarity == level) && (!type || (type && (polarity != extract32(s->data, line, 1))))) {
+    	s->intstatus = deposit32(s->intstatus, line, 1, 1);
+	} else {
+		s->intstatus = deposit32(s->intstatus, line, 1, 0);
+	}
+
+}
+
 static void CMSDKAHB_GPIO_set(void *opaque, int line, int level)
 {
     
     CMSDKAHB_GPIOState *s = CMSDKAHB_GPIO(opaque);
 
-    s->data = deposit32(s->data, line, 1, level);
+    if (!extract32(s->outenbits, line, 1)) {
+	    CMSDKAHB_GPIO_set_int_line(s, line, level);
+
+	    s->data = deposit32(s->data, line, 1, level);
+
+	    CMSDKAHB_GPIO_update_int(s);
+    }
+}
+
+static void CMSDKAHB_GPIO_set_all_int_lines(CMSDKAHB_GPIOState *s)
+{
+    int i;
+
+    uint32_t val = (s->data & ~s->outenbits) | (s->dataout & s->outenbits);
+
+    for (i = 0; i < CMSDKAHB_GPIO_PIN_COUNT; i++) {
+    	CMSDKAHB_GPIO_set_int_line(s, i, extract32(val, i, 1));
+    }
+
+    CMSDKAHB_GPIO_update_int(s);
 }
 
 static inline void CMSDKAHB_GPIO_set_all_output_lines(CMSDKAHB_GPIOState *s)
@@ -37,9 +87,11 @@ static inline void CMSDKAHB_GPIO_set_all_output_lines(CMSDKAHB_GPIOState *s)
 
     for (i = 0; i < CMSDKAHB_GPIO_PIN_COUNT; i++) {
         if (extract32(s->outenbits, i, 1) && s->output[i]) {
+    		CMSDKAHB_GPIO_set_int_line(s, i, extract32(s->dataout, i, 1));
             qemu_set_irq(s->output[i], extract32(s->dataout, i, 1));
         }
     }
+    CMSDKAHB_GPIO_update_int(s);
 }
 
 static uint64_t CMSDKAHB_GPIO_read(void *opaque, hwaddr addr, unsigned int size)
@@ -56,35 +108,24 @@ static uint64_t CMSDKAHB_GPIO_read(void *opaque, hwaddr addr, unsigned int size)
     	val = s->dataout;
     	break;
     case REG_OUTENSET:
-    	val = s->outenbits;
-    	break;
-
     case REG_OUTENCLR:
     	val = s->outenbits;
     	break;
     case REG_ALTFUNCSET:
-    	val = s->altfuncset;
-    	break;
     case REG_ALTFUNCCLR:
-    	val = s->altfuncclr;
+    	val = s->altfunc;
     	break;
     case REG_INTENSET:
-    	val = s->intenset;
-    	break;
     case REG_INTENCLR:
-    	val = s->intenclr;
+    	val = s->inten;
     	break;
     case REG_INTTYPESET:
-    	val = s->inttypeset;
-    	break;
     case REG_INTTYPECLR:
-    	val = s->inttypeclr;
+    	val = s->inttype;
     	break;
     case REG_INTPOLSET:
-    	val = s->intpolset;
-    	break;
     case REG_INTPOLCLR:
-    	val = s->intpolclr;
+    	val = s->intpol;
     	break;
     case REG_INTSTATUS:
     	val = s->intstatus;
@@ -133,31 +174,38 @@ static void CMSDKAHB_GPIO_write(void *opaque, hwaddr addr, uint64_t val,
 		CMSDKAHB_GPIO_set_all_output_lines(s);
     	break;
     case REG_ALTFUNCSET:	//Используется для включения альтернативного функционала(i2c, spi)???
-    	s->altfuncset = val;
+    	s->altfunc = val;
     	break;
     case REG_ALTFUNCCLR:
-    	s->altfuncclr &= ~val;
+    	s->altfunc &= ~val;
     	break;
     case REG_INTENSET:
-    	s->intenset = val;
+    	s->inten = val;
+    	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_INTENCLR:
-    	s->intenclr &= ~val;
+    	s->inten &= ~val;
+    	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_INTTYPESET:
-    	s->inttypeset = val;
+    	s->inttype = val;
+    	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_INTTYPECLR:
-    	s->inttypeclr &= ~val;
+    	s->inttype &= ~val;
+    	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_INTPOLSET:
-    	s->intpolset = val;
+    	s->intpol = val;
+    	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_INTPOLCLR:
-    	s->intpolclr &= ~val;
+    	s->intpol &= ~val;
+    	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_INTSTATUS:
     	s->intstatus = val;
+    	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case MASKLOWBYTE:
     	s->masklowbyte = val;
@@ -182,18 +230,15 @@ static void CMSDKAHB_GPIO_reset(DeviceState *dev)
 
 	s->dataout = 0;
 	s->outenbits = 0;
-	s->altfuncset = 0; //propertie value
-	s->altfuncclr = 0; //propertie value
-	s->intenset = 0;
-	s->inttypeset = 0;
-	s->inttypeclr = 0;
-	s->intpolset = 0;
-	s->intpolclr = 0;
+	s->altfunc = 0; //propertie value
+	s->inten = 0;
+	s->inttype = 0;
+	s->intpol = 0;
 	s->intstatus = 0;
 	//s->masklowbyte = 0;
 	//s->maskhighbyte = 0;
 
-	CMSDKAHB_GPIO_set_all_output_lines(s);
+	CMSDKAHB_GPIO_set_all_int_lines(s);
 }
 
 static void CMSDKAHB_GPIO_realize(DeviceState *dev, Error **errp)
@@ -206,6 +251,10 @@ static void CMSDKAHB_GPIO_realize(DeviceState *dev, Error **errp)
 
     qdev_init_gpio_in(DEVICE(s), CMSDKAHB_GPIO_set, CMSDKAHB_GPIO_PIN_COUNT);
     qdev_init_gpio_out(DEVICE(s), s->output, CMSDKAHB_GPIO_PIN_COUNT);
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(s->irqs); i++) {
+        sysbus_init_irq(sbd, &s->irqs[i]);
+    }
 }
 
 static void CMSDKAHB_GPIO_class_init(ObjectClass *klass, void *data)

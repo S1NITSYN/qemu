@@ -51,7 +51,7 @@ struct SATELLITEState {
     uint32_t pwr_ctrl_clk;
     uint32_t pwr_ctrl_rst;
     uint32_t dma_internal_flags;
-    uint32_t gpio_alt_func_ctrl;
+    uint32_t gpio_alt_func_ctrl[9];
     uint32_t alias_ctrl;
     uint32_t global_reset;
 

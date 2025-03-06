@@ -20,21 +20,22 @@
 #define REG_INTPOLSET	0x30
 #define REG_INTPOLCLR	0x34
 #define REG_INTSTATUS	0x38
-#define MASKLOWBYTE		0x400// ... 0x7FC)
-#define MASKHIGHBYTE	0x800// ... 0xBFC)
+#define MASKLOWBYTE_START	0x400
+#define MASKLOWBYTE_END		0x7FC
+#define MASKHIGHBYTE_START	0x800
+#define MASKHIGHBYTE_END	0xBFC
 
 static void CMSDKAHB_GPIO_update_int(CMSDKAHB_GPIOState *s)
-{
-	int i;
-	for (i = 0; i < CMSDKAHB_GPIO_PIN_COUNT; i++) {
-		if (!extract32(s->intstatus, i, 1)) {
-			qemu_set_irq(s->irqs[i], 0);
-		} else if (extract32(s->inttype, i, 1)) {
-			qemu_irq_pulse(s->irqs[i]);
-			s->intstatus = deposit32(s->intstatus, i, 1, 0);
-		} else {
-			qemu_set_irq(s->irqs[i], 1);
-		}
+{	
+	if (!s->intstatus) {
+		qemu_irq_lower(s->irq);
+		printf("%s\n", "dropped irq");
+	} else if (s->inttype & s->intstatus) {
+		qemu_irq_pulse(s->irq);
+		printf("%s\n", "pulse irq");
+	} else {
+		qemu_irq_raise(s->irq);
+		printf("%s\n", "set irq");
 	}
 }
 
@@ -51,12 +52,10 @@ static void CMSDKAHB_GPIO_set_int_line(CMSDKAHB_GPIOState *s, int line, uint8_t 
 	} else {
 		s->intstatus = deposit32(s->intstatus, line, 1, 0);
 	}
-
 }
 
 static void CMSDKAHB_GPIO_set(void *opaque, int line, int level)
 {
-    
     CMSDKAHB_GPIOState *s = CMSDKAHB_GPIO(opaque);
 
     if (!extract32(s->outenbits, line, 1)) {
@@ -130,20 +129,10 @@ static uint64_t CMSDKAHB_GPIO_read(void *opaque, hwaddr addr, unsigned int size)
     case REG_INTSTATUS:
     	val = s->intstatus;
     	break;
-    case MASKLOWBYTE:
-    	/*
-			Для этих регистров, если они будут использщоваться,
-			сделать срез конкретно на этот адрес, а значение
-			хранить в отдельной переменной
-    	*/
+    case MASKLOWBYTE_START...MASKLOWBYTE_END: //unrealized
     	val = s->masklowbyte;
     	break;
-    case MASKHIGHBYTE:
-    	/*
-			Для этих регистров, если они будут использщоваться,
-			сделать срез конкретно на этот адрес, а значение
-			хранить в отдельной переменной
-    	*/
+    case MASKHIGHBYTE_START...MASKHIGHBYTE_END: //unrealized
     	val = s->maskhighbyte;
     	break;
 
@@ -162,18 +151,18 @@ static void CMSDKAHB_GPIO_write(void *opaque, hwaddr addr, uint64_t val,
     switch (addr) {
     case REG_DATA:
     case REG_DATAOUT:
-    	s->dataout = val; //после обновления dataout, нужно обновлять qemu_irq output поднимать или опускать эти прерывания
+    	s->dataout = val;
 		CMSDKAHB_GPIO_set_all_output_lines(s);
     	break;
     case REG_OUTENSET:
     	s->outenbits = val;
-		CMSDKAHB_GPIO_set_all_output_lines(s);
+		CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_OUTENCLR:
     	s->outenbits &= ~val;
-		CMSDKAHB_GPIO_set_all_output_lines(s);
+		CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
-    case REG_ALTFUNCSET:	//Используется для включения альтернативного функционала(i2c, spi)???
+    case REG_ALTFUNCSET:
     	s->altfunc = val;
     	break;
     case REG_ALTFUNCCLR:
@@ -204,13 +193,13 @@ static void CMSDKAHB_GPIO_write(void *opaque, hwaddr addr, uint64_t val,
     	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
     case REG_INTSTATUS:
-    	s->intstatus = val;
+    	s->intstatus &= ~(val & s->inttype) & s->inten;
     	CMSDKAHB_GPIO_set_all_int_lines(s);
     	break;
-    case MASKLOWBYTE:
+    case MASKLOWBYTE_START...MASKLOWBYTE_END: //unrealized
     	s->masklowbyte = val;
     	break;
-    case MASKHIGHBYTE:
+    case MASKHIGHBYTE_START...MASKHIGHBYTE_END: //unrealized
     	s->maskhighbyte = val;
     	break;
 
@@ -224,19 +213,21 @@ static const MemoryRegionOps CMSDKAHB_GPIO_ops = {
     .write = CMSDKAHB_GPIO_write,
 };
 
+static Property CMSDKAHB_GPIO_properties[] = {
+    DEFINE_PROP_UINT32("AltFuncVal", CMSDKAHB_GPIOState, altfunc, 0xFFFF),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
 static void CMSDKAHB_GPIO_reset(DeviceState *dev)
 {
     CMSDKAHB_GPIOState *s = CMSDKAHB_GPIO(dev);
 
 	s->dataout = 0;
 	s->outenbits = 0;
-	s->altfunc = 0; //propertie value
 	s->inten = 0;
 	s->inttype = 0;
 	s->intpol = 0;
 	s->intstatus = 0;
-	//s->masklowbyte = 0;
-	//s->maskhighbyte = 0;
 
 	CMSDKAHB_GPIO_set_all_int_lines(s);
 }
@@ -251,10 +242,8 @@ static void CMSDKAHB_GPIO_realize(DeviceState *dev, Error **errp)
 
     qdev_init_gpio_in(DEVICE(s), CMSDKAHB_GPIO_set, CMSDKAHB_GPIO_PIN_COUNT);
     qdev_init_gpio_out(DEVICE(s), s->output, CMSDKAHB_GPIO_PIN_COUNT);
-
-    for (uint32_t i = 0; i < ARRAY_SIZE(s->irqs); i++) {
-        sysbus_init_irq(sbd, &s->irqs[i]);
-    }
+    
+    sysbus_init_irq(sbd, &s->irq);
 }
 
 static void CMSDKAHB_GPIO_class_init(ObjectClass *klass, void *data)
@@ -263,7 +252,8 @@ static void CMSDKAHB_GPIO_class_init(ObjectClass *klass, void *data)
 
     dc->realize = CMSDKAHB_GPIO_realize;
     dc->reset = CMSDKAHB_GPIO_reset;
-    dc->desc = "ZVENOM";
+    dc->desc = "cmsdk-ahb-gpio";
+    device_class_set_props(dc, CMSDKAHB_GPIO_properties);
 }
 
 static const TypeInfo CMSDKAHB_GPIO_info = {

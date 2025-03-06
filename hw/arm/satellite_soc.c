@@ -24,7 +24,14 @@
 #define REG_PWR_CTRL_CLK        0x28
 #define REG_PWR_CTRL_RST        0x2C
 #define REG_DMA_INTR_FLAGS      0x70
-#define REG_ALT_FUNCTION_CTRL   0x74 // - 0x94
+
+/*
+    В документации внутри reg_alt_func_ctrl находится 9 регистров(4 байта на каждый),
+    Но при этом адрес с 0x74 по 0x94, что равно 32 байтам(вместо 36(9 * 4))
+*/
+//#define REG_ALT_FUNCTION_CTRL   0x74...0x94
+#define REG_ALT_FUNCTION_CTRL_START   0x74 // - 0x94
+#define REG_ALT_FUNCTION_CTRL_END     0x98 // в документации - 0x94
 #define REG_ALIAS_CTRL          0xAC
 #define REG_GLOBAL_RESET        0xBC
 
@@ -35,6 +42,8 @@
 
 #define ALIAS_CTRL_VALUES_NUM   8
 #define ALIAS_CTRL_MAX_VALUE    0xC
+
+#define REG_ALT_FUNC_INDEX(addr)    ((addr) - REG_ALT_FUNCTION_CTRL_START) / sizeof(uint32_t)         
 
 static void SATELLITE_reset(DeviceState *dev);
 
@@ -67,8 +76,8 @@ static uint64_t SATELLITE_read(void *opaque, hwaddr addr, unsigned int size)
     case REG_DMA_INTR_FLAGS:
         val = s->dma_internal_flags;
         break;
-    case REG_ALT_FUNCTION_CTRL:
-        val = s->gpio_alt_func_ctrl;
+    case REG_ALT_FUNCTION_CTRL_START...REG_ALT_FUNCTION_CTRL_END:
+        val = s->gpio_alt_func_ctrl[REG_ALT_FUNC_INDEX(addr)];
         break;
     case REG_ALIAS_CTRL:
         val = s->alias_ctrl;
@@ -111,8 +120,8 @@ static void SATELLITE_write(void *opaque, hwaddr addr, uint64_t val,
     case REG_DMA_INTR_FLAGS:
         s->dma_internal_flags = val;
         break;
-    case REG_ALT_FUNCTION_CTRL:
-        s->gpio_alt_func_ctrl = val;
+    case REG_ALT_FUNCTION_CTRL_START...REG_ALT_FUNCTION_CTRL_END:
+        s->gpio_alt_func_ctrl[REG_ALT_FUNC_INDEX(addr)] = val;
         break;
     case REG_ALIAS_CTRL: //переписать этот case
         s->alias_ctrl = val;
@@ -155,8 +164,11 @@ static void SATELLITE_reset(DeviceState *dev)
     s->external_memory_ctrl2 = 0x1FF;
     s->external_memory_ctrl3 = 0x1FF;
     s->external_memory_ctrl4 = 0x1FF;
+    
+    for (int i = 0; i < 9; i++) {
+        s->gpio_alt_func_ctrl[i] = 0;
+    }
     s->dma_internal_flags = 0;
-    s->gpio_alt_func_ctrl = 0;
     s->alias_ctrl = 0;
     s->global_reset = 0;
 
@@ -303,14 +315,17 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
     }
 
 
+    uint32_t ALTFUNCVALS[9] = {0xFFFF, 0xFFFF, 0xFFFF, 0x007F,
+                               0x0008, 0x0000, 0x0000, 0x00E0, 0x0000};
     for (uint32_t i = 0; i < 9; i++) {
         busdev = SYS_BUS_DEVICE(&s->gpio[i]);
+        qdev_prop_set_uint32(DEVICE(&s->gpio[i]), "AltFuncVal", ALTFUNCVALS[i]);
         if (!sysbus_realize(busdev, &error_fatal)) {
             return;
         }
         memory_region_add_subregion(system_memory, 0x80000000 + i * 0x10000,
                                     sysbus_mmio_get_region(busdev, 0));
-        //sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 24 + i));
+        sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 8 + i));
     }
 
     busdev = SYS_BUS_DEVICE(&s->spi[0]);
@@ -405,15 +420,6 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
                                     sysbus_mmio_get_region(busdev, 0));
     sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 0));
 
-    create_unimplemented_device("GPIOA", 0x80010000, 0x10000);
-    create_unimplemented_device("GPIOB", 0x80020000, 0x10000);
-    create_unimplemented_device("GPIOC", 0x80030000, 0x10000);
-    create_unimplemented_device("GPIOD", 0x80040000, 0x10000);
-    create_unimplemented_device("GPIOE", 0x80050000, 0x10000);
-    create_unimplemented_device("GPIOF", 0x80060000, 0x10000);
-    create_unimplemented_device("GPIOG", 0x80070000, 0x10000);
-    create_unimplemented_device("GPIOH", 0x80080000, 0x10000);
-    create_unimplemented_device("GPIOI", 0x80090000, 0x10000);
     //create_unimplemented_device("general_purpose_registers", 0xA0000000, 0x10000);       ??
     //create_unimplemented_device("DMAC", 0xA0010000, 0x1000);       ??
     create_unimplemented_device("CAN1", 0xA01B0000, 0x10000);

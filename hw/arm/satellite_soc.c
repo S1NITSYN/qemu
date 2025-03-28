@@ -15,15 +15,37 @@
 #include "hw/timer/cmsdk-apb-timer.h"
 #include "hw/arm/irqmux.h"
 #include "hw/gpio/cmsdk-ahb-gpio.h"
+#include "hw/net/can/can_wrapper_B5023VS016.h"
 
-#define REG_MASK                0xFFFF
-#define REG_EXTMEM_CTRL         0x0
-#define REG_EXTMEM2_CTRL        0x30
-#define REG_EXTMEM3_CTRL        0x34
-#define REG_EXTMEM4_CTRL        0x38
-#define REG_PWR_CTRL_CLK        0x28
-#define REG_PWR_CTRL_RST        0x2C
-#define REG_DMA_INTR_FLAGS      0x70
+#define REG_MASK                    0xFFFF
+#define REG_EXTMEM_CTRL             0x0
+#define REG_EDAC_CTRL               0x4
+#define REG_INTMEM_CERR_CNT         0x8 
+#define REG_INTMEM_FERR_CNT         0xC
+#define REG_EXTMEM_CERR_CNT         0x10
+#define REG_EXTMEM_FERR_CNT         0x14
+#define REG_SPACEWIRE_CLK_CTRL      0x1C
+#define REG_INTMEM2_CERR_CNT        0x20
+#define REG_INTMEM2_FERR_CNT        0x24
+#define REG_PWR_CTRL_CLK            0x28
+#define REG_PWR_CTRL_RST            0x2C
+#define REG_EXTMEM2_CTRL            0x30
+#define REG_EXTMEM3_CTRL            0x34
+#define REG_EXTMEM4_CTRL            0x38
+#define REG_CACHE_HIGH_ADDR         0x3C
+#define REG_INTMEM_SCR_RNG_ADDR     0x40
+#define REG_INTMEM_SCR_PRD_SCAN     0x44
+#define REG_INTMEM_SCR_PRD_STOP     0x48
+#define REG_INTMEM2_SCR_RNG_ADDR    0x4c
+#define REG_INTMEM2_SCR_PRD_SCAN    0x50
+#define REG_INTMEM2_SCR_PRD_STOP    0x54
+#define REG_INTMEMS_SCR_MAIN        0x58
+#define REG_CACHE_CRC_ERROR         0x5c
+#define REG_EDAC_INTMEM_SCR_CERR    0x60
+#define REG_EDAC_INTMEM_SCR_FERR    0x64
+#define REG_EDAC_INTMEM2_SCR_CERR   0x68
+#define REG_EDAC_INTMEM2_SCR_FERR   0x6C
+#define REG_DMA_INTR_FLAGS          0x70
 
 /*
     В документации внутри reg_alt_func_ctrl находится 9 регистров(4 байта на каждый),
@@ -32,13 +54,20 @@
 //#define REG_ALT_FUNCTION_CTRL   0x74...0x94
 #define REG_ALT_FUNCTION_CTRL_START   0x74 // - 0x94
 #define REG_ALT_FUNCTION_CTRL_END     0x98 // в документации - 0x94
-#define REG_ALIAS_CTRL          0xAC
-#define REG_GLOBAL_RESET        0xBC
+#define REG_CACHE_HIGH_ADDR_CS2         0xA0
+#define REG_CACHE_HIGH_ADDR_CS3         0xA4
+#define REG_CACHE_HIGH_ADDR_CS4         0xA8
+#define REG_ALIAS_CTRL              0xAC
+#define REG_SCRUBBER_FERR_ADDR          0xB0
+#define REG_COMMON_FERR_ADDR            0xB4
+#define REG_EDAC_REACTION_CTRL          0xB8
+#define REG_GLOBAL_RESET            0xBC
+#define REG_CACHE_MAIN                  0xC4
 
 #define INTERNAL_BANK_CNT       2
-#define INTERNAL_BANK_SIZE      8 * 8 * KiB
+#define INTERNAL_BANK_SIZE      (8 * 8 * KiB)
 #define EXTERNAL_BANK_CNT       4
-#define EXTERNAL_BANK_SIZE      2 * 8 * MiB
+#define EXTERNAL_BANK_SIZE      (2 * 8 * MiB)
 
 #define ALIAS_CTRL_VALUES_NUM   8
 #define ALIAS_CTRL_MAX_VALUE    0xC
@@ -56,7 +85,22 @@ static uint64_t SATELLITE_read(void *opaque, hwaddr addr, unsigned int size)
     switch (addr) {
     case REG_EXTMEM_CTRL:
         val = s->external_memory_ctrl1;
-        printf("%s\n", "EBOLDA\n\n");
+        break;
+    case REG_EDAC_CTRL:
+    case REG_INTMEM_CERR_CNT:
+    case REG_INTMEM_FERR_CNT:
+    case REG_EXTMEM_CERR_CNT:
+    case REG_EXTMEM_FERR_CNT:
+    case REG_SPACEWIRE_CLK_CTRL:
+    case REG_INTMEM2_CERR_CNT:
+    case REG_INTMEM2_FERR_CNT:
+        /*UNREALIZED*/
+        break;
+    case REG_PWR_CTRL_CLK:
+        val = s->pwr_ctrl_clk;
+        break;
+    case REG_PWR_CTRL_RST:
+        val = s->pwr_ctrl_rst;
         break;
     case REG_EXTMEM2_CTRL:
         val = s->external_memory_ctrl2;
@@ -67,11 +111,24 @@ static uint64_t SATELLITE_read(void *opaque, hwaddr addr, unsigned int size)
     case REG_EXTMEM4_CTRL:
         val = s->external_memory_ctrl4;
         break;
-    case REG_PWR_CTRL_CLK:
-        val = s->pwr_ctrl_clk;
+    case REG_CACHE_HIGH_ADDR:
+    case REG_INTMEM_SCR_RNG_ADDR:
+    case REG_INTMEM_SCR_PRD_SCAN:
+    case REG_INTMEM_SCR_PRD_STOP:
+    case REG_INTMEM2_SCR_RNG_ADDR:
+    case REG_INTMEM2_SCR_PRD_SCAN:
+    case REG_INTMEM2_SCR_PRD_STOP:
+        /*UNREALIZED*/
         break;
-    case REG_PWR_CTRL_RST:
-        val = s->pwr_ctrl_rst;
+    case REG_INTMEMS_SCR_MAIN:
+        val = s->intmems_scr_main;
+        break;
+    case REG_CACHE_CRC_ERROR:
+    case REG_EDAC_INTMEM_SCR_CERR:
+    case REG_EDAC_INTMEM_SCR_FERR:
+    case REG_EDAC_INTMEM2_SCR_CERR:
+    case REG_EDAC_INTMEM2_SCR_FERR:
+        /*UNREALIZED*/
         break;
     case REG_DMA_INTR_FLAGS:
         val = s->dma_internal_flags;
@@ -79,11 +136,24 @@ static uint64_t SATELLITE_read(void *opaque, hwaddr addr, unsigned int size)
     case REG_ALT_FUNCTION_CTRL_START...REG_ALT_FUNCTION_CTRL_END:
         val = s->gpio_alt_func_ctrl[REG_ALT_FUNC_INDEX(addr)];
         break;
+    case REG_CACHE_HIGH_ADDR_CS2:
+    case REG_CACHE_HIGH_ADDR_CS3:
+    case REG_CACHE_HIGH_ADDR_CS4:
+        /*UNREALIZED*/
+        break;
     case REG_ALIAS_CTRL:
         val = s->alias_ctrl;
         break;
+    case REG_SCRUBBER_FERR_ADDR:
+    case REG_COMMON_FERR_ADDR:
+    case REG_EDAC_REACTION_CTRL:
+        /*UNREALIZED*/
+        break;
     case REG_GLOBAL_RESET:
         val = s->global_reset;
+        break;
+    case REG_CACHE_MAIN:
+        /*UNREALIZED*/
         break;
     default:
         break;
@@ -102,6 +172,22 @@ static void SATELLITE_write(void *opaque, hwaddr addr, uint64_t val,
     case REG_EXTMEM_CTRL:
         s->external_memory_ctrl1 = val;
         break;
+    case REG_EDAC_CTRL:
+    case REG_INTMEM_CERR_CNT:
+    case REG_INTMEM_FERR_CNT:
+    case REG_EXTMEM_CERR_CNT:
+    case REG_EXTMEM_FERR_CNT:
+    case REG_SPACEWIRE_CLK_CTRL:
+    case REG_INTMEM2_CERR_CNT:
+    case REG_INTMEM2_FERR_CNT:
+        /*UNREALIZED*/
+        break;
+    case REG_PWR_CTRL_CLK:
+        s->pwr_ctrl_clk = val;
+        break;
+    case REG_PWR_CTRL_RST:
+        s->pwr_ctrl_rst = val;
+        break;
     case REG_EXTMEM2_CTRL:
         s->external_memory_ctrl2 = val;
         break;
@@ -111,17 +197,37 @@ static void SATELLITE_write(void *opaque, hwaddr addr, uint64_t val,
     case REG_EXTMEM4_CTRL:
         s->external_memory_ctrl4 = val;
         break;
-    case REG_PWR_CTRL_CLK:
-        s->pwr_ctrl_clk = val;
+    case REG_CACHE_HIGH_ADDR:
+    case REG_INTMEM_SCR_RNG_ADDR:
+    case REG_INTMEM_SCR_PRD_SCAN:
+    case REG_INTMEM_SCR_PRD_STOP:
+    case REG_INTMEM2_SCR_RNG_ADDR:
+    case REG_INTMEM2_SCR_PRD_SCAN:
+    case REG_INTMEM2_SCR_PRD_STOP:
+        /*UNREALIZED*/
         break;
-    case REG_PWR_CTRL_RST:
-        s->pwr_ctrl_rst = val;
+    case REG_INTMEMS_SCR_MAIN: 
+        /*  TODO: Переделать "муляж" скраббера. Сейчас скраббер сразу "активируется"
+            после записи в него стартовых значений*/
+        s->intmems_scr_main = (val & 0x3) | ((val & 0x3) << 2); 
+        break;
+    case REG_CACHE_CRC_ERROR:
+    case REG_EDAC_INTMEM_SCR_CERR:
+    case REG_EDAC_INTMEM_SCR_FERR:
+    case REG_EDAC_INTMEM2_SCR_CERR:
+    case REG_EDAC_INTMEM2_SCR_FERR:
+        /*UNREALIZED*/
         break;
     case REG_DMA_INTR_FLAGS:
         s->dma_internal_flags = val;
         break;
     case REG_ALT_FUNCTION_CTRL_START...REG_ALT_FUNCTION_CTRL_END:
         s->gpio_alt_func_ctrl[REG_ALT_FUNC_INDEX(addr)] = val;
+        break;
+    case REG_CACHE_HIGH_ADDR_CS2:
+    case REG_CACHE_HIGH_ADDR_CS3:
+    case REG_CACHE_HIGH_ADDR_CS4:
+        /*UNREALIZED*/
         break;
     case REG_ALIAS_CTRL: //переписать этот case
         s->alias_ctrl = val;
@@ -138,13 +244,20 @@ static void SATELLITE_write(void *opaque, hwaddr addr, uint64_t val,
         memory_region_set_enabled(s->aliases.region[index], true);
         s->aliases.last_opened_reg = index;
         break;
-
+    case REG_SCRUBBER_FERR_ADDR:
+    case REG_COMMON_FERR_ADDR:
+    case REG_EDAC_REACTION_CTRL:
+        /*UNREALIZED*/
+        break;
     case REG_GLOBAL_RESET:
         s->global_reset = val;
         if (val) {
             SATELLITE_reset(opaque);
             return;
         }
+        break;
+    case REG_CACHE_MAIN:
+        /*UNREALIZED*/
         break;
     default:
         break;
@@ -175,7 +288,6 @@ static void SATELLITE_reset(DeviceState *dev)
     memory_region_set_enabled(s->aliases.region[s->aliases.last_opened_reg], false);
     memory_region_set_enabled(s->aliases.region[4], true);
     s->aliases.last_opened_reg = 4;
-    //TODO: make it easier
 }
 
 static void SATELLITE_soc_initfn(Object *obj)
@@ -203,7 +315,6 @@ static void SATELLITE_soc_initfn(Object *obj)
         if (serial_hd(i)) {
             object_initialize_child(obj, name, &s->uart[i], TYPE_PL011);
         } else {
-            //continue;
             break;
         }
     }
@@ -212,6 +323,14 @@ static void SATELLITE_soc_initfn(Object *obj)
         snprintf(name, sizeof(name), "timer%u", i);
         object_initialize_child(obj, name, &s->timer[i],
                                 TYPE_CMSDK_APB_TIMER);
+    }
+
+    Object *can_bus = object_resolve_path("canbus0", NULL);
+    if (can_bus) {
+        object_initialize_child(obj, "CAN0", &s->CAN[0], TYPE_CAN_DEV);
+        object_initialize_child(obj, "CAN1", &s->CAN[1], TYPE_CAN_DEV);
+        object_property_set_link(OBJECT(&s->CAN[0]), "canbus", can_bus, &error_fatal);
+        object_property_set_link(OBJECT(&s->CAN[1]), "canbus", can_bus, &error_fatal);
     }
 
     object_initialize_child(obj, "watchdog", &s->watchdog, TYPE_CMSDK_APB_WATCHDOG);
@@ -228,7 +347,6 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
 
     MemoryRegion *system_memory = get_system_memory();
 
-    
     if (clock_has_source(s->refclk)) {
         error_setg(errp, "refclk clock must not be wired up by the board code");
         return;
@@ -311,7 +429,7 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
     memory_region_add_subregion(system_memory, 0xA01D0000,
                                 sysbus_mmio_get_region(busdev, 0));
     for (uint32_t i = 0; i < LINE_MAX_NUM; i++) {
-        qdev_connect_gpio_out(DEVICE(&s->multiplexer), i, qdev_get_gpio_in(cpu, i)); //не помню второй параметр
+        qdev_connect_gpio_out(DEVICE(&s->multiplexer), i, qdev_get_gpio_in(cpu, i));
     }
 
 
@@ -410,6 +528,21 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
                                     sysbus_mmio_get_region(busdev, 0));
         sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 1 + i));
     }
+
+    if (object_resolve_path("canbus0", NULL)) {
+        for (uint32_t i = 0; i < 2; i++) {
+            busdev = SYS_BUS_DEVICE(&s->CAN[i]);
+            if (!sysbus_realize(busdev, &error_fatal)) {
+                return;
+            }
+            memory_region_add_subregion(system_memory, 0xA01B0000 + i * 0x10000,
+                                        sysbus_mmio_get_region(busdev, 0));
+            sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 52 + i));
+        }
+    } else {
+        create_unimplemented_device("CAN1", 0xA01B0000, 0x10000);
+        create_unimplemented_device("CAN2", 0xA01C0000, 0x10000);
+    }
     
     qdev_connect_clock_in(DEVICE(&s->watchdog), "WDOGCLK", s->sysclk);
     busdev = SYS_BUS_DEVICE(&s->watchdog);
@@ -420,10 +553,7 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
                                     sysbus_mmio_get_region(busdev, 0));
     sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 0));
 
-    //create_unimplemented_device("general_purpose_registers", 0xA0000000, 0x10000);       ??
     //create_unimplemented_device("DMAC", 0xA0010000, 0x1000);       ??
-    create_unimplemented_device("CAN1", 0xA01B0000, 0x10000);
-    create_unimplemented_device("CAN2", 0xA01C0000, 0x10000);
     //create_unimplemented_device("I2C", 0xA0200000, 0x10000);       ??
     create_unimplemented_device("test_access_to_mem1_data", 0x60000000, 0x10000);
     create_unimplemented_device("test_access_to_mem1_ECC", 0x60100000, 0x10000);
@@ -431,8 +561,6 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("test_access_to_cacheWay1TarCrc", 0x61100000, 0x4000);
     create_unimplemented_device("test_access_to_mem2_data", 0x62000000, 0x10000);
     create_unimplemented_device("test_access_to_mem2_ECC", 0x62100000, 0x10000);
-
-    printf("%s\n", "ALL PASSED");
 }
 
 static Property SATELLITE_soc_properties[] = {

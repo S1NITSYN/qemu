@@ -460,6 +460,7 @@ config SATELLITE_SOC
     select CMSDK_APB_WATCHDOG
     select IRQMUX
     select CMSDK_AHB_GPIO
+    select CAN_SATELLITE
 
 config XLNX_ZYNQMP_ARM
     bool

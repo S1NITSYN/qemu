@@ -29,13 +29,10 @@ static void CMSDKAHB_GPIO_update_int(CMSDKAHB_GPIOState *s)
 {	
 	if (!s->intstatus) {
 		qemu_irq_lower(s->irq);
-		printf("%s\n", "dropped irq");
 	} else if (s->inttype & s->intstatus) {
 		qemu_irq_pulse(s->irq);
-		printf("%s\n", "pulse irq");
 	} else {
 		qemu_irq_raise(s->irq);
-		printf("%s\n", "set irq");
 	}
 }
 

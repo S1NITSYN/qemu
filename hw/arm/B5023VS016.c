@@ -19,7 +19,7 @@
 #include "hw/qdev-clock.h"
 #include "hw/arm/boot.h"
 
-#define SYSCLK_FRQ (72 * 1000 * 1000)
+#define SYSCLK_FRQ (80 * 1000 * 1000)
 #define NUM_IRQ_LINES 64
 
 typedef struct {

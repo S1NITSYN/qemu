@@ -13,6 +13,7 @@
 #include "hw/timer/cmsdk-apb-timer.h"
 #include "hw/arm/irqmux.h"
 #include "hw/gpio/cmsdk-ahb-gpio.h"
+#include "hw/net/can/can_wrapper_B5023VS016.h"
 
 #define TYPE_SATELLITE_SOC "satellite-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(SATELLITEState, SATELLITE_SOC)
@@ -44,12 +45,13 @@ struct SATELLITEState {
     MemoryRegion* internal_mem[2];
 
     MemoryRegion* iomem;
+    uint32_t pwr_ctrl_clk;
+    uint32_t pwr_ctrl_rst;
     uint32_t external_memory_ctrl1;
     uint32_t external_memory_ctrl2;
     uint32_t external_memory_ctrl3;
     uint32_t external_memory_ctrl4;
-    uint32_t pwr_ctrl_clk;
-    uint32_t pwr_ctrl_rst;
+    uint32_t intmems_scr_main;
     uint32_t dma_internal_flags;
     uint32_t gpio_alt_func_ctrl[9];
     uint32_t alias_ctrl;
@@ -61,9 +63,9 @@ struct SATELLITEState {
     PL011State uart[6];
     CMSDKAPBWatchdog watchdog;
     CMSDKAPBTimer timer[4];
-    //can`s
+    CanSatelliteState CAN[2];
     IRQMUXState multiplexer;
-    //i2c ??
+    //i2c
 
     Clock *sysclk;
     Clock *refclk;

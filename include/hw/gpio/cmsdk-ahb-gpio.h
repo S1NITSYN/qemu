@@ -1,11 +1,11 @@
 #ifndef HW_GPIO_CMSDKAHB_GPIO_H
 #define HW_GPIO_CMSDKAHB_GPIO_H
 
-#include "qom/object.h"
-#include "hw/sysbus.h"
 #include "hw/irq.h"
+#include "hw/sysbus.h"
+#include "qom/object.h"
 
-#define CMSDKAHB_GPIO_PIN_COUNT	16
+#define CMSDKAHB_GPIO_PIN_COUNT 16
 
 typedef struct CMSDKAHB_GPIOState {
     /*< private >*/
@@ -16,20 +16,21 @@ typedef struct CMSDKAHB_GPIOState {
     uint32_t data;
     uint32_t dataout;
     uint32_t outenbits;
-    uint32_t altfunc; //unrealized
+    uint32_t altfunc;  // unrealized
     uint32_t inten;
     uint32_t inttype;
     uint32_t intpol;
     uint32_t intstatus;
-    uint32_t masklowbyte; //unrealized
-    uint32_t maskhighbyte; //unrealized
+    uint32_t masklowbyte;   // unrealized
+    uint32_t maskhighbyte;  // unrealized
 
     qemu_irq output[CMSDKAHB_GPIO_PIN_COUNT];
     qemu_irq irq;
-    
+
 } CMSDKAHB_GPIOState;
 
 #define TYPE_CMSDKAHB_GPIO "CMSDKAHB_GPIO"
-#define CMSDKAHB_GPIO(obj) OBJECT_CHECK(CMSDKAHB_GPIOState, (obj), TYPE_CMSDKAHB_GPIO)
+#define CMSDKAHB_GPIO(obj) \
+    OBJECT_CHECK(CMSDKAHB_GPIOState, (obj), TYPE_CMSDKAHB_GPIO)
 
-#endif
+#endif /*HW_GPIO_CMSDKAHB_GPIO_H*/

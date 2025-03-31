@@ -20,12 +20,13 @@
 #include "hw/arm/boot.h"
 
 #define SYSCLK_FRQ (80 * 1000 * 1000)
-#define NUM_IRQ_LINES 64
 
 typedef struct {
     MachineState parent;
 
     ARMv7MState *cpu;
+
+    SATELLITEState *soc;
 
     NVICState nvic;
 
@@ -35,31 +36,28 @@ typedef struct {
 #define B5023VS016_MACHINE(obj) \
     OBJECT_CHECK(B5023VS016MachineState, obj, TYPE_B5023VS016_MACHINE)
 
-static void B5023VS016_init(MachineState *machine)
-{
-    DeviceState *dev;
+static void B5023VS016_init(MachineState *machine) {
+    B5023VS016MachineState *s = B5023VS016_MACHINE(machine);
     Clock *sysclk;
 
     sysclk = clock_new(OBJECT(machine), "SYSCLK");
     clock_set_hz(sysclk, SYSCLK_FRQ);
 
-    dev = qdev_new(TYPE_SATELLITE_SOC);
-    qdev_prop_set_string(dev, "cpu-type", ARM_CPU_TYPE_NAME("cortex-m0"));
-    qdev_connect_clock_in(dev, "sysclk", sysclk);
-    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
+    s->soc = (SATELLITEState *)qdev_new(TYPE_SATELLITE_SOC);
+    qdev_prop_set_string(DEVICE(s->soc), "cpu-type",
+                         ARM_CPU_TYPE_NAME("cortex-m0"));
+    qdev_connect_clock_in(DEVICE(s->soc), "sysclk", sysclk);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(DEVICE(s->soc)), &error_fatal);
 
-    armv7m_load_kernel(ARM_CPU(first_cpu),
-                       machine->kernel_filename,
-                       0, FLASH_SIZE);
+    armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0,
+                       FLASH_SIZE);
 }
 
-static void B5023VS016_reset(MachineState *machine, ShutdownCause reason)
-{
+static void B5023VS016_reset(MachineState *machine, ShutdownCause reason) {
     qemu_devices_reset(reason);
 }
 
-static void B5023VS016_class_init(ObjectClass *oc, void *data)
-{
+static void B5023VS016_class_init(ObjectClass *oc, void *data) {
     MachineClass *mc = MACHINE_CLASS(oc);
 
     mc->desc = "Integrated circuit 5023BC016";
@@ -77,8 +75,7 @@ static const TypeInfo B5023VS016_info = {
     .class_init = B5023VS016_class_init,
 };
 
-static void B5023VS016_machines_init(void)
-{
+static void B5023VS016_machines_init(void) {
     type_register_static(&B5023VS016_info);
 }
 

@@ -10,13 +10,11 @@
 #include "hw/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "net/can_emu.h"
-
 #include "can_sja1000.h"
 #include "qom/object.h"
 #include "can_wrapper_B5023VS016.h"
 
-static void can_satellite_irq_handler(void *opaque, int irq_num, int level)
-{
+static void can_satellite_irq_handler(void *opaque, int irq_num, int level) {
     CanSatelliteState *d = opaque;
 
     if (d->irq_level == level) {
@@ -27,16 +25,15 @@ static void can_satellite_irq_handler(void *opaque, int irq_num, int level)
     qemu_set_irq(d->irq, d->irq_level);
 }
 
-static void can_satellite_reset(DeviceState *dev)
-{
+static void can_satellite_reset(DeviceState *dev) {
     CanSatelliteState *d = CAN_SATELLITE_DEV(dev);
     CanSJA1000State *s = &d->sja_state;
 
     can_sja_hardware_reset(s);
 }
 
-static uint64_t can_satellite_sja_io_read(void *opaque, hwaddr addr, unsigned size)
-{
+static uint64_t can_satellite_sja_io_read(void *opaque, hwaddr addr,
+                                          unsigned size) {
     CanSatelliteState *d = opaque;
     CanSJA1000State *s = &d->sja_state;
     hwaddr actual_address = (addr / 4);
@@ -49,8 +46,7 @@ static uint64_t can_satellite_sja_io_read(void *opaque, hwaddr addr, unsigned si
 }
 
 static void can_satellite_sja_io_write(void *opaque, hwaddr addr, uint64_t data,
-                                    unsigned size)
-{
+                                       unsigned size) {
     CanSatelliteState *d = opaque;
     CanSJA1000State *s = &d->sja_state;
     hwaddr actual_address = (addr / 4);
@@ -66,13 +62,9 @@ static const MemoryRegionOps can_satellite_sja_io_ops = {
     .read = can_satellite_sja_io_read,
     .write = can_satellite_sja_io_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
-    /*.impl = {
-        .max_access_size = 1,
-    },*/
 };
 
-static void can_satellite_realize(DeviceState *dev, Error **errp)
-{
+static void can_satellite_realize(DeviceState *dev, Error **errp) {
     CanSatelliteState *d = CAN_SATELLITE_DEV(dev);
     CanSJA1000State *s = &d->sja_state;
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
@@ -86,8 +78,8 @@ static void can_satellite_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    memory_region_init_io(&d->sja_io, OBJECT(dev), &can_satellite_sja_io_ops,
-                          d, "can_satellite-sja", can_satellite_SJA_RANGE);
+    memory_region_init_io(&d->sja_io, OBJECT(dev), &can_satellite_sja_io_ops, d,
+                          "can_satellite-sja", can_satellite_SJA_RANGE);
     sysbus_init_mmio(sbd, &d->sja_io);
     sysbus_init_irq(sbd, &d->irq);
 }
@@ -102,37 +94,32 @@ static void can_satellite_realize(DeviceState *dev, Error **errp)
     qemu_free_irq(d->irq);
 }*/
 
-static void can_satellite_instance_init(Object *obj)
-{
+static void can_satellite_instance_init(Object *obj) {
     CanSatelliteState *d = CAN_SATELLITE_DEV(obj);
 
-    object_property_add_link(obj, "canbus", TYPE_CAN_BUS,
-                             (Object **)&d->canbus,
-                             qdev_prop_allow_set_link_before_realize,
-                             0);
+    object_property_add_link(obj, "canbus", TYPE_CAN_BUS, (Object **)&d->canbus,
+                             qdev_prop_allow_set_link_before_realize, 0);
 }
 
-static void can_satellite_class_init(ObjectClass *klass, void *data)
-{
+static void can_satellite_class_init(ObjectClass *klass, void *data) {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = can_satellite_realize;
-    //dc->exit = can_satellite_exit;
+    // dc->exit = can_satellite_exit;
     dc->desc = "Satellite CAN device";
     dc->reset = can_satellite_reset;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 }
 
 static const TypeInfo can_satellite_info = {
-    .name          = TYPE_CAN_DEV,
-    .parent        = TYPE_SYS_BUS_DEVICE,
+    .name = TYPE_CAN_DEV,
+    .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(CanSatelliteState),
-    .class_init    = can_satellite_class_init,
+    .class_init = can_satellite_class_init,
     .instance_init = can_satellite_instance_init,
 };
 
-static void can_satellite_register_types(void)
-{
+static void can_satellite_register_types(void) {
     type_register_static(&can_satellite_info);
 }
 

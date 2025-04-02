@@ -72,6 +72,8 @@
 
 #define ALIAS_CTRL_VALUES_NUM 8
 #define ALIAS_CTRL_MAX_VALUE 0xC
+#define GET_EXTMEM_ALIAS(val) (((val) >> 2) & 3)
+#define GET_INTMEM_ALIAS(val) ((val) & 3)
 
 #define REG_ALT_FUNC_INDEX(addr) \
     ((addr)-REG_ALT_FUNCTION_CTRL_START) / sizeof(uint32_t)
@@ -229,21 +231,19 @@ static void SATELLITE_write(void *opaque, hwaddr addr, uint64_t val,
     case REG_CACHE_HIGH_ADDR_CS4:
         /*UNREALIZED*/
         break;
-    case REG_ALIAS_CTRL:  //переписать этот case
+    case REG_ALIAS_CTRL:
         s->alias_ctrl = val;
 
-        if (val > ALIAS_CTRL_MAX_VALUE) {
-            break;
+        if (GET_INTMEM_ALIAS(val) == 0) {
+            val = GET_EXTMEM_ALIAS(val) + 3;
+        } else {
+            val = GET_INTMEM_ALIAS(val) - 1;
         }
 
-        uint32_t index = val;
-        if (val > 3) {
-            index = (index >> 2) + 4;
-        }
         memory_region_set_enabled(s->aliases.region[s->aliases.last_opened_reg],
                                   false);
-        memory_region_set_enabled(s->aliases.region[index], true);
-        s->aliases.last_opened_reg = index;
+        memory_region_set_enabled(s->aliases.region[val], true);
+        s->aliases.last_opened_reg = val;
         break;
     case REG_SCRUBBER_FERR_ADDR:
     case REG_COMMON_FERR_ADDR:
@@ -285,8 +285,8 @@ static void SATELLITE_reset(DeviceState *dev) {
 
     memory_region_set_enabled(s->aliases.region[s->aliases.last_opened_reg],
                               false);
-    memory_region_set_enabled(s->aliases.region[4], true);
-    s->aliases.last_opened_reg = 4;
+    memory_region_set_enabled(s->aliases.region[3], true);
+    s->aliases.last_opened_reg = 3;
 }
 
 static void SATELLITE_soc_initfn(Object *obj) {
@@ -360,7 +360,7 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
 
     for (uint32_t i = 0; i < EXTERNAL_BANK_CNT; i++) {
         char name[32];
-        snprintf(name, sizeof(name), "ChipSelect%u", i);
+        snprintf(name, sizeof(name), "ChipSelect%u", i + 1);
 
         s->external_mem[i] = g_new(MemoryRegion, 1);
         memory_region_init_ram(s->external_mem[i], NULL, name,
@@ -372,7 +372,7 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
 
     for (uint32_t i = 0; i < INTERNAL_BANK_CNT; i++) {
         char name[32];
-        snprintf(name, sizeof(name), "IMU%u", i);
+        snprintf(name, sizeof(name), "IMU%u", i + 1);
 
         s->internal_mem[i] = g_new(MemoryRegion, 1);
         memory_region_init_ram(s->internal_mem[i], NULL, name,

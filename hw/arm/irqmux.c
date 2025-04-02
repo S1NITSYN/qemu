@@ -316,6 +316,19 @@ static void IRQMUX_write(void *opaque, hwaddr addr, uint64_t val,
     default:
         break;
     }
+
+    for (int i = 0; i < IRQ_MAX_NUM; i++) {
+        if (i == REGS_MASK(addr)) {
+            continue;
+        }
+        if (((val & CTRL_REG_VAL) == (s->int_mux_ctrl_regs[i] & CTRL_REG_VAL)) &&
+            (val & s->int_mux_ctrl_regs[i] & CTRL_REG_EN)) {
+            error_setg(
+                &error_fatal,
+                "IRQMUX: We doesn`t handle \"2 devices connects to 1 irq\" "
+                "situation");
+        }
+    }
 }
 
 static const MemoryRegionOps IRQMUX_ops = {

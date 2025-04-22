@@ -76,7 +76,7 @@
 #define GET_INTMEM_ALIAS(val) ((val) & 3)
 
 #define REG_ALT_FUNC_INDEX(addr) \
-    ((addr)-REG_ALT_FUNCTION_CTRL_START) / sizeof(uint32_t)
+    (((addr)-REG_ALT_FUNCTION_CTRL_START) / sizeof(uint32_t))
 
 static void SATELLITE_reset(DeviceState *dev);
 
@@ -321,6 +321,11 @@ static void SATELLITE_soc_initfn(Object *obj) {
         object_initialize_child(obj, name, &s->timer[i], TYPE_CMSDK_APB_TIMER);
     }
 
+    for (i = 0; i < 4; i++) {
+        snprintf(name, sizeof(name), "pwm%u", i);
+        object_initialize_child(obj, name, &s->pwm[i], TYPE_EHRPWM);
+    }
+
     Object *can_bus = object_resolve_path("canbus0", NULL);
     if (can_bus) {
         object_initialize_child(obj, "CAN0", &s->CAN[0], TYPE_CAN_DEV);
@@ -536,6 +541,18 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
                            qdev_get_gpio_in(DEVICE(&s->multiplexer), 1 + i));
     }
 
+    for (uint32_t i = 0; i < 4; i++) {
+        busdev = SYS_BUS_DEVICE(&s->pwm[i]);
+        qdev_connect_clock_in(DEVICE(&s->pwm[i]), "pclk", s->sysclk);
+        if (!sysbus_realize_and_unref(busdev, &error_fatal)) {
+            return;
+        }
+        memory_region_add_subregion(system_memory, 0xA0160000 + i * 0x10000,
+                                    sysbus_mmio_get_region(busdev, 0));
+        /*sysbus_connect_irq(busdev, 0,
+                           qdev_get_gpio_in(DEVICE(&s->multiplexer), 1 + i));*/
+    }
+
     if (object_resolve_path("canbus0", NULL)) {
         for (uint32_t i = 0; i < 2; i++) {
             busdev = SYS_BUS_DEVICE(&s->CAN[i]);
@@ -563,6 +580,8 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
 
     // create_unimplemented_device("DMAC", 0xA0010000, 0x1000);       ??
     // create_unimplemented_device("I2C", 0xA0200000, 0x10000);       ??
+    create_unimplemented_device("QEP", 0xA01A0000,
+                                0x10000);
     create_unimplemented_device("test_access_to_mem1_data", 0x60000000,
                                 0x10000);
     create_unimplemented_device("test_access_to_mem1_ECC", 0x60100000, 0x10000);

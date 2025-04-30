@@ -53,16 +53,91 @@
 #define     TBSTS_MODE_COUNT_UP       1
 #define     TBSTS_MODE_COUNT_DOWN     0
 
+static void AQ_handler(void *opaque, output_signal_names cmp_index) {
+    EHRPWMState *s = (EHRPWMState *)opaque;
+    int offset = 0;
+
+    if (cmp_index == A)
+        offset += 4;
+    else if (cmp_index == B)
+        offset += 8;
+
+    if (s->timer.tbsts.ctrdir == TBSTS_MODE_COUNT_DOWN)
+        offset += 2;
+
+    for (output_signal_names index = A; index < 2; index++) {
+        switch(s->aqctl[index] & (0x3 << offset)) {
+            case 0:
+                printf("ВСЕ ТАК?)\t%x\n\n", index);
+                break;
+            case 1:
+                printf("ВСЕ НЕ ТАК1?)\t%x\n\n", index);
+                qemu_irq_lower(s->EPWMx[index]);
+                break;
+            case 2:
+                printf("ВСЕ НЕ ТАК2?)\t%x\n\n", index);
+
+                qemu_irq_raise(s->EPWMx[index]);
+                break;
+            case 3:
+                printf("ВСЕ НЕ ТАК3?)\t%x\n\n", index);
+
+                qemu_irq_invert(s->EPWMx[index]);
+                break;
+        }
+    }
+}
+
+static void cmp_reload(void *opaque, output_signal_names index)
+{
+    EHRPWMState *s = (EHRPWMState *)opaque;
+    int64_t tick = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    uint32_t count = 0;
+    uint32_t cmp_value = extract32(s->cmp[index].actual_value, 16, 16);
+    //can write an assert here
+
+    switch (s->timer.tbsts.ctrdir) {
+    case TBSTS_MODE_COUNT_UP:
+        count = cmp_value;
+        break;
+    case TBSTS_MODE_COUNT_DOWN:
+        count = (uint16_t)s->timer.tbprd.actual_value - cmp_value;
+        break;
+    }
+
+    uint32_t clkdiv_value = (1 << s->timer.tbctl.clkdiv);
+    uint32_t hspclkdiv_value = 
+               (!s->timer.tbctl.hspclkdiv) ? 1 : (2 * s->timer.tbctl.hspclkdiv);
+
+    tick += clock_ticks_to_ns(s->pclk, count * clkdiv_value * hspclkdiv_value); //НАДО БУДЕТ ПРОВЕРИТЬ
+
+    timer_mod(s->cmp_timer[index], tick);
+}
+
+static void cmp_tick_A(void *opaque)
+{
+    /*EHRPWMState *s = (EHRPWMState *)opaque;
+    timer_del(s->cmp_timer[A]);*/ //Это пока на всякий
+    AQ_handler(opaque, A); 
+}
+
+static void cmp_tick_B(void *opaque)
+{
+    /*EHRPWMState *s = (EHRPWMState *)opaque;
+    timer_del(s->cmp_timer[B]);*/ //Это пока на всякий
+    AQ_handler(opaque, B);
+}
+
 static uint16_t get_count(void *opaque) {
     EHRPWMState *s = (EHRPWMState *)opaque;
     uint16_t value = 0;
     uint8_t direction = s->timer.tbsts.ctrdir;
 
-    if (!((uint16_t)s->timer.tbprd) || (direction == TBSTS_MODE_COUNT_DOWN)) {
+    if (!((uint16_t)s->timer.tbprd.actual_value) || (direction == TBSTS_MODE_COUNT_DOWN)) {
         value = ((uint16_t)ptimer_get_count(s->timer.ptimer));
     } else if (direction == TBSTS_MODE_COUNT_UP) {
         value =
-         ((uint16_t)s->timer.tbprd) - ((uint16_t)ptimer_get_count(s->timer.ptimer));
+         ((uint16_t)s->timer.tbprd.actual_value) - ((uint16_t)ptimer_get_count(s->timer.ptimer));
     }
     return value;
 }
@@ -70,19 +145,19 @@ static uint16_t get_count(void *opaque) {
 static void set_count(void *opaque, uint32_t value) {
     EHRPWMState *s = (EHRPWMState *)opaque;
     switch (s->timer.tbsts.ctrdir) {
-        case TBSTS_MODE_COUNT_UP:
-            ptimer_set_count(s->timer.ptimer,
-                             ((uint16_t)s->timer.tbprd) - ((uint16_t)value));
-            break;
-        case TBSTS_MODE_COUNT_DOWN:
-            ptimer_set_count(s->timer.ptimer, value);
-            break;
+    case TBSTS_MODE_COUNT_UP:
+        ptimer_set_count(s->timer.ptimer,
+                         ((uint16_t)s->timer.tbprd.actual_value) - ((uint16_t)value));
+        break;
+    case TBSTS_MODE_COUNT_DOWN:
+        ptimer_set_count(s->timer.ptimer, value);
+        break;
     }
 }
 
 static void EHRPWM_irq_update(EHRPWMState *s)
 {
-
+    //TODO: implement irq support
 }
 
 static void EHRPWM_tick(void *opaque)
@@ -93,18 +168,38 @@ static void EHRPWM_tick(void *opaque)
         то, нужно это отметить в статусном регистре TBSTS значением 0x4
     */
 
-    if (!s->timer.tbctl.prdld /*&& (get_count(opaque) == 0)*/) { //должно происходить по событию значения таймера = 0
-        ptimer_set_limit(s->timer.ptimer, extract32(s->timer.tbprd, 0, 16), 0);
-    }
-
     //Где-то здесь можно будет добавить обраотку прерываний, если нужно
 
     if (s->timer.tbctl.ctrmode == TBCTL_MODE_COUNT_UP_DOWN) {
         s->timer.tbsts.ctrdir ^= 0x1;
     }
 
-    /* restart timer */
-    ptimer_set_count(s->timer.ptimer, (uint16_t)s->timer.tbprd);
+    if (s->timer.tbsts.ctrdir == TBSTS_MODE_COUNT_UP) {
+        if (!s->timer.tbctl.prdld) {
+            s->timer.tbprd.actual_value = s->timer.tbprd.shadowed_value;
+            ptimer_set_limit(s->timer.ptimer, (uint16_t)s->timer.tbprd.actual_value, 0);
+        }
+        /*
+            Следующие строчки тут находятся только при применении текущего
+            теста. Если будут применяться другие тесты, то следующее поведение
+            надо будет переписывать
+        */
+        s->cmp[A].actual_value = s->cmp[A].shadowed_value;
+        s->cmp[B].actual_value = s->cmp[B].shadowed_value;
+    }
+
+    AQ_handler(opaque, -1);
+
+    ptimer_set_count(s->timer.ptimer, (uint16_t)s->timer.tbprd.actual_value);
+
+    for (int index = 0; index < 2; index++) {
+        uint32_t cmp_value = extract32(s->cmp[index].actual_value, 16, 16);
+        if ((cmp_value == 0) || (cmp_value == (uint16_t)s->timer.tbprd.actual_value)) {
+            continue;
+        }
+        cmp_reload(opaque, index);
+    }
+
     ptimer_run(s->timer.ptimer, 1);
 }
 
@@ -184,7 +279,7 @@ static void TBCTL_handler(void *opaque) {
             */
             if ((extract32(s->timer.tbphs, 16, 16) == 0) &&
                 (s->timer.tbsts.ctrdir == TBSTS_MODE_COUNT_DOWN)) {
-                s->timer.tbctr = s->timer.tbprd;
+                s->timer.tbctr = (uint16_t)s->timer.tbprd.actual_value;
             } else {
                 s->timer.tbctr = extract32(s->timer.tbphs, 16, 16);
             }
@@ -194,8 +289,29 @@ static void TBCTL_handler(void *opaque) {
         }
     }
 
-    if ((s->timer.tbctl.ctrmode == 0x3) || (s->timer.tbprd == 0)) {
+    if ((s->timer.tbctl.ctrmode == 0x3) || ((uint16_t)s->timer.tbprd.actual_value == 0)) {
         return;
+    }
+
+    for (int index = 0; index < 2; index++) {
+        uint32_t cmp_value = extract32(s->cmp[index].actual_value, 16, 16);
+        if ((cmp_value == 0) ||
+            (cmp_value == (uint16_t)s->timer.tbprd.actual_value)) {
+            continue;
+        }
+        switch (s->timer.tbsts.ctrdir) {
+        case TBSTS_MODE_COUNT_UP:
+            if (get_count(opaque) > cmp_value) {
+                continue;
+            }
+            break;
+        case TBSTS_MODE_COUNT_DOWN:
+            if (get_count(opaque) < cmp_value) {
+                continue;
+            }
+            break;
+        }
+        cmp_reload(opaque, index);
     }
 
     ptimer_run(s->timer.ptimer, 1);
@@ -227,11 +343,27 @@ static uint64_t EHRPWM_read(void *opaque, hwaddr offset,
         break;
 
     case REG_TBPRD:
-        value = s->timer.tbprd;
+        value = s->timer.tbprd.actual_value;
         break;
 
     case REG_INTCLR:
         value = s->intclr;
+        break;
+
+    //компаратор
+    case REG_CMPA:
+        value = s->cmp[A].actual_value;
+        break;
+    case REG_CMPB:
+        value = s->cmp[B].actual_value;
+        break;
+
+    //обработчик событий
+    case REG_AQCTLA:
+        value = s->aqctl[A];
+        break;
+    case REG_AQCTLB:
+        value = s->aqctl[B];
         break;
 
     default:
@@ -247,6 +379,7 @@ static void EHRPWM_write(void *opaque, hwaddr offset,
         uint64_t value, unsigned size)
 {
     EHRPWMState *s = (EHRPWMState *)opaque;
+    uint8_t index;
 
     switch (offset) {
     case REG_TBCTL:
@@ -276,11 +409,12 @@ static void EHRPWM_write(void *opaque, hwaddr offset,
         break;
 
     case REG_TBPRD: //максимальное значение счета таймера [0-15]
-        s->timer.tbprd = value;
+        s->timer.tbprd.shadowed_value = value;
         ptimer_transaction_begin(s->timer.ptimer);
-        if (s->timer.tbctl.prdld ||
-            ptimer_get_count(s->timer.ptimer) == 0) { // || s->timer.tbctl.ctrmode == 0x3 
-            ptimer_set_limit(s->timer.ptimer, extract32(s->timer.tbprd, 0, 16), 1);
+        if (s->timer.tbctl.prdld || !ptimer_get_count(s->timer.ptimer)) { // || s->timer.tbctl.ctrmode == 0x3 
+            s->timer.tbprd.actual_value = s->timer.tbprd.shadowed_value;
+            ptimer_set_limit(s->timer.ptimer,
+                             extract32(s->timer.tbprd.actual_value, 0, 16), 1);
             set_count(opaque, s->timer.tbctr);
         }
         TBCTL_handler(opaque);
@@ -291,11 +425,35 @@ static void EHRPWM_write(void *opaque, hwaddr offset,
         s->intclr &= ~value;
         EHRPWM_irq_update(s);
         break;
-        default:
-            qemu_log_mask(LOG_GUEST_ERROR,
-                          "EHRPWM: bad write offset " HWADDR_FMT_plx,
-                          offset);
-            break;
+
+    /*
+        Следующие регистры не рассматривают абсолютно все сценарии ШИМа
+        и рассчитаны только на существующие драйвера. Если драйвера будут
+        изменены, то и поведение этих регистров и связанных с ними элементов,
+        нужно будет дописывать
+    */
+    //компаратор
+    case REG_CMPA:      //объединить эти два варианта
+    case REG_CMPB:
+        index = (offset == REG_CMPA) ? A : B;
+        s->cmp[index].shadowed_value = value;
+        if (!ptimer_get_count(s->timer.ptimer)) {
+            s->cmp[index].actual_value = s->cmp[index].shadowed_value;
+        }
+        break;
+    //обработчик событий
+    case REG_AQCTLA:
+        s->aqctl[A] = value;
+        break;
+    case REG_AQCTLB:
+        s->aqctl[B] = value;
+        break;
+
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "EHRPWM: bad write offset " HWADDR_FMT_plx,
+                      offset);
+        break;
     }
 }
 
@@ -311,11 +469,14 @@ static void EHRPWM_reset(DeviceState *d)
     s->timer.tbsts.reg_value = 0;
     s->timer.tbphs = 0;
     s->timer.tbctr = 0;
-    s->timer.tbprd = 0;
+    s->timer.tbprd.shadowed_value = 0;
+    s->timer.tbprd.actual_value = 0;
 
     s->cmpctl = 0;
-    s->cmp[A] = 0;
-    s->cmp[B] = 0;
+    s->cmp[A].shadowed_value = 0;
+    s->cmp[A].actual_value = 0;
+    s->cmp[B].shadowed_value = 0;
+    s->cmp[B].actual_value = 0;
     s->aqctl[A] = 0;
     s->aqctl[B] = 0;
     s->aqsfrc = 0;
@@ -364,7 +525,6 @@ static void EHRPWM_init(Object *obj)
 {
     EHRPWMState *s = EHRPWM(obj);
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
-    //int i;
 
     sysbus_init_irq(sbd, &s->irq);
 
@@ -380,13 +540,16 @@ static void EHRPWM_realize(DeviceState *dev, Error **errp)
     EHRPWMState *s = EHRPWM(dev);
 
     if (!clock_has_source(s->pclk)) {
-        error_setg(errp, "EHRPWM: pclk clock must be connected");
+        error_setg(errp, "EHRPWM: clk clock must be connected");
         return;
     }
 
     s->timer.ptimer = ptimer_init(EHRPWM_tick,
                                      s,
                                      PTIMER_POLICY_NO_COUNTER_ROUND_DOWN);
+
+    s->cmp_timer[A] = timer_new_ns(QEMU_CLOCK_VIRTUAL, cmp_tick_A, s);
+    s->cmp_timer[B] = timer_new_ns(QEMU_CLOCK_VIRTUAL, cmp_tick_B, s);
 
     ptimer_transaction_begin(s->timer.ptimer);
     ptimer_set_period_from_clock(s->timer.ptimer, s->pclk, 1);

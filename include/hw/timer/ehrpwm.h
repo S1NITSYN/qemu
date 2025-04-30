@@ -41,19 +41,25 @@ typedef union {
 } tbsts_t;
 
 typedef struct {
-    tbctl_t     tbctl;
-    tbsts_t     tbsts;
-    uint32_t    tbphs;
-    uint32_t    tbctr;
-    uint32_t    tbprd;
+    uint32_t    shadowed_value;
+    uint32_t    actual_value;
+} shadowable_t;
+
+typedef struct {
+    tbctl_t         tbctl;
+    tbsts_t         tbsts;
+    uint32_t        tbphs;
+    uint32_t        tbctr;
+    shadowable_t    tbprd;
 
     ptimer_state *ptimer;
 } EHRPWMTimer;
 
-enum output_signal_names {
+
+typedef enum {
     A,
     B,
-};
+} output_signal_names;
 
 #define TYPE_EHRPWM "EHRPWM"
 OBJECT_DECLARE_SIMPLE_TYPE(EHRPWMState, EHRPWM)
@@ -66,11 +72,8 @@ struct EHRPWMState {
     Clock *pclk;
     EHRPWMTimer timer;
 
-    /*
-        При работе с cmp, мы используем импульсы, а не irqset
-    */
     uint32_t cmpctl;
-    uint32_t cmp[2];
+    shadowable_t cmp[2];
     uint32_t aqctl[2];
     uint32_t aqsfrc;
     uint32_t aqcsfrc;
@@ -95,6 +98,7 @@ struct EHRPWMState {
 
     qemu_irq irq;
     qemu_irq EPWMx[2];
+    QEMUTimer *cmp_timer[2];
 };
 
 #endif //HW_TIMER_EHRPWM_H

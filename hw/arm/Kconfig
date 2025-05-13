@@ -462,6 +462,7 @@ config SATELLITE_SOC
     select CMSDK_AHB_GPIO
     select CAN_SATELLITE
     select EHRPWM
+    select EQEP
 
 config XLNX_ZYNQMP_ARM
     bool

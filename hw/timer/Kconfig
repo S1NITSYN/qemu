@@ -32,6 +32,10 @@ config EHRPWM
     bool
     select PTIMER
 
+config EQEP
+    bool
+    select PTIMER
+
 config STM32F2XX_TIMER
     bool
 

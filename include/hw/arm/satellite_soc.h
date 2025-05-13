@@ -13,6 +13,7 @@
 #include "hw/ssi/stm32f2xx_spi.h"
 #include "hw/timer/cmsdk-apb-timer.h"
 #include "hw/timer/ehrpwm.h"
+#include "hw/timer/eqep.h"
 #include "hw/watchdog/cmsdk-apb-watchdog.h"
 #include "qom/object.h"
 
@@ -62,7 +63,7 @@ struct SATELLITEState {
     CMSDKAPBWatchdog watchdog;
     CMSDKAPBTimer timer[4];
     EHRPWMState pwm[4];
-    // qep
+    EQEPState qep;
     CanSatelliteState CAN[2];
     IRQMUXState multiplexer;
     // i2c

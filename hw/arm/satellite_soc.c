@@ -326,6 +326,8 @@ static void SATELLITE_soc_initfn(Object *obj) {
         object_initialize_child(obj, name, &s->pwm[i], TYPE_EHRPWM);
     }
 
+    object_initialize_child(obj, "qep", &s->qep, TYPE_EQEP);
+
     Object *can_bus = object_resolve_path("canbus0", NULL);
     if (can_bus) {
         object_initialize_child(obj, "CAN0", &s->CAN[0], TYPE_CAN_DEV);
@@ -553,6 +555,16 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
                            qdev_get_gpio_in(DEVICE(&s->multiplexer), 64 + i));
     }
 
+    busdev = SYS_BUS_DEVICE(&s->qep);
+    qdev_connect_clock_in(DEVICE(&s->qep), "pclk", s->sysclk);
+    if (!sysbus_realize_and_unref(busdev, &error_fatal)) {
+        return;
+    }
+    memory_region_add_subregion(system_memory, 0xA01A0000,
+                                sysbus_mmio_get_region(busdev, 0));
+    sysbus_connect_irq(busdev, 0,
+                       qdev_get_gpio_in(DEVICE(&s->multiplexer), 60));
+
     if (object_resolve_path("canbus0", NULL)) {
         for (uint32_t i = 0; i < 2; i++) {
             busdev = SYS_BUS_DEVICE(&s->CAN[i]);
@@ -578,8 +590,6 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
                                 sysbus_mmio_get_region(busdev, 0));
     sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 0));
 
-    create_unimplemented_device("QEP", 0xA01A0000,
-                                0x10000);
     create_unimplemented_device("DMAC", 0xA0010000, 0x1000); //       ??
     create_unimplemented_device("I2C", 0xA0200000, 0x10000); //       ??
     create_unimplemented_device("test_access_to_mem1_data", 0x60000000,

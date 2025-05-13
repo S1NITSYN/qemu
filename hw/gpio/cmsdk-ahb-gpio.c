@@ -43,6 +43,13 @@ static void CMSDKAHB_GPIO_set_int_line(CMSDKAHB_GPIOState *s, int line,
     uint32_t polarity = extract32(s->intpol, line, 1);
     uint32_t type = extract32(s->inttype, line, 1);
 
+    /*
+        CPPCHECK gave an advice to change next sentece:
+        "(!type || (type && (polarity != extract32(s->data, line, 1))))"
+        to this:
+        "(!type || polarity != extract32(s->data, line, 1))"
+    */
+
     if ((polarity == level) &&
         (!type || (type && (polarity != extract32(s->data, line, 1))))) {
         s->intstatus = deposit32(s->intstatus, line, 1, 1);

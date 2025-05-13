@@ -47,7 +47,7 @@
 #define IRQ_SRC_DMA_UART_6_TX 110
 #define IRQ_SRC_DMA_UART_6_RX 111
 
-#define CTRL_REG_EN (1 << 31)
+#define CTRL_REG_EN (1ul << 31)
 #define CTRL_REG_VAL 0x1F
 
 #define REGS_MASK(addr) ((addr) >> 2)

@@ -55,12 +55,6 @@ typedef struct {
     ptimer_state *ptimer;
 } EHRPWMTimer;
 
-
-typedef enum {
-    A,
-    B,
-} output_signal_names;
-
 #define TYPE_EHRPWM "EHRPWM"
 OBJECT_DECLARE_SIMPLE_TYPE(EHRPWMState, EHRPWM)
 

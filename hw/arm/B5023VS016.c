@@ -36,6 +36,13 @@ typedef struct {
 #define B5023VS016_MACHINE(obj) \
     OBJECT_CHECK(B5023VS016MachineState, obj, TYPE_B5023VS016_MACHINE)
 
+//TODO: MAKE IT CONFIGURABLE FROM CMD
+static void external_usage(SATELLITEState *soc) {
+    /*
+        use that function for connections between devices
+    */
+}
+
 static void B5023VS016_init(MachineState *machine) {
     B5023VS016MachineState *s = B5023VS016_MACHINE(machine);
     Clock *sysclk;
@@ -51,6 +58,8 @@ static void B5023VS016_init(MachineState *machine) {
 
     armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0,
                        FLASH_SIZE);
+
+    external_usage(s->soc);
 }
 
 static void B5023VS016_reset(MachineState *machine, ShutdownCause reason) {

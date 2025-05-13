@@ -53,6 +53,11 @@
 #define     TBSTS_MODE_COUNT_UP       1
 #define     TBSTS_MODE_COUNT_DOWN     0
 
+typedef enum {
+    A,
+    B,
+} output_signal_names;
+
 static void AQ_handler(void *opaque, output_signal_names cmp_index) {
     EHRPWMState *s = (EHRPWMState *)opaque;
     int offset = 0;
@@ -163,10 +168,10 @@ static void EHRPWM_irq_update(EHRPWMState *s)
 static void EHRPWM_tick(void *opaque)
 {
     EHRPWMState *s = (EHRPWMState *)opaque;
-    /*
-        Если было достигнуто максмальное значение таймера (0xFFFF),
-        то, нужно это отметить в статусном регистре TBSTS значением 0x4
-    */
+
+    if (get_count(opaque) == 0xFFFF) {
+        s->timer.tbsts.ctrmax = 1;
+    }
 
     //Где-то здесь можно будет добавить обраотку прерываний, если нужно
 
@@ -181,8 +186,8 @@ static void EHRPWM_tick(void *opaque)
         }
         /*
             Следующие строчки тут находятся только при применении текущего
-            теста. Если будут применяться другие тесты, то следующее поведение
-            надо будет переписывать
+            драйвера. Если будут применяться другие драйвера, то следующее
+            поведение надо будет переписывать
         */
         s->cmp[A].actual_value = s->cmp[A].shadowed_value;
         s->cmp[B].actual_value = s->cmp[B].shadowed_value;
@@ -203,19 +208,6 @@ static void EHRPWM_tick(void *opaque)
     ptimer_run(s->timer.ptimer, 1);
 }
 
-/*
-    ***ОПИСАНИЕ РАБОТЫ СЧЕТЧИКА В РЕЖИМЕ СИНХРОНИЗАЦИИ***
-    В железе, если мы оставляем PHSDIR == 0 и TBPHS == 0 (и все остальные регистры
-    сконфигурированны соотвественно под запуск счетчика), то в TBCTR должно
-    загрузится максимальное значение счетчика и начать счет от него вниз
-    (как будто, это нештатная ситуация и она нигде не описана).
-    На данный момент при PHSDIR == 0 и TBPHS == 0 (и всех остальных регистрах
-    сконфигурированных соотвественно под запуск счетчика) начинается счет вверх
-    от нуля(собственно по логике устройства)
-
-    Подумать, нужно ли будет это потом исправить. В остальном, режим по
-    синхронизации и по обычному запуску работает исправно.
-*/
 static void TBCTL_handler(void *opaque) {
     EHRPWMState *s = (EHRPWMState *)opaque;
 
@@ -394,7 +386,7 @@ static void EHRPWM_write(void *opaque, hwaddr offset,
         ptimer_transaction_commit(s->timer.ptimer);
         break;
 
-    case REG_TBSTS: //RO Статусный регистр: достижения максимального значения, Статус синхронизации, Текущее направление счёта таймера
+    case REG_TBSTS: //RO
         break;
 
     case REG_TBPHS: //начальная фазa Таймера
@@ -409,7 +401,7 @@ static void EHRPWM_write(void *opaque, hwaddr offset,
         break;
 
     case REG_TBPRD: //максимальное значение счета таймера [0-15]
-        s->timer.tbprd.shadowed_value = value;
+        s->timer.tbprd.shadowed_value = (value & 0xFFFF);
         ptimer_transaction_begin(s->timer.ptimer);
         if (s->timer.tbctl.prdld || !ptimer_get_count(s->timer.ptimer)) { // || s->timer.tbctl.ctrmode == 0x3 
             s->timer.tbprd.actual_value = s->timer.tbprd.shadowed_value;
@@ -428,12 +420,12 @@ static void EHRPWM_write(void *opaque, hwaddr offset,
 
     /*
         Следующие регистры не рассматривают абсолютно все сценарии ШИМа
-        и рассчитаны только на существующие драйвера. Если драйвера будут
+        и рассчитаны только на текущую реализацию драйвера. Если драйвера будут
         изменены, то и поведение этих регистров и связанных с ними элементов,
         нужно будет дописывать
     */
     //компаратор
-    case REG_CMPA:      //объединить эти два варианта
+    case REG_CMPA:
     case REG_CMPB:
         index = (offset == REG_CMPA) ? A : B;
         s->cmp[index].shadowed_value = value;
@@ -461,10 +453,6 @@ static void EHRPWM_reset(DeviceState *d)
 {
     EHRPWMState *s = EHRPWM(d);
     
-    /*
-        В официальной доке написано, что по умолчанию счет отключен, т.е. биты
-        CTRMODE регистра TBCTL выставлены в 011
-    */
     s->timer.tbctl.reg_value = 0;
     s->timer.tbsts.reg_value = 0;
     s->timer.tbphs = 0;
@@ -544,6 +532,8 @@ static void EHRPWM_realize(DeviceState *dev, Error **errp)
         return;
     }
 
+    qdev_init_gpio_out(DEVICE(s), s->EPWMx, 2);
+
     s->timer.ptimer = ptimer_init(EHRPWM_tick,
                                      s,
                                      PTIMER_POLICY_NO_COUNTER_ROUND_DOWN);
@@ -555,16 +545,6 @@ static void EHRPWM_realize(DeviceState *dev, Error **errp)
     ptimer_set_period_from_clock(s->timer.ptimer, s->pclk, 1);
     ptimer_transaction_commit(s->timer.ptimer);
 }
-
-#if 0
-static void EHRPWM_finalize(Object *obj) //подуматьЮ пригодится ли это потом
-{
-    EHRPWMState *s = EHRPWM(obj);
-    //int i;
-
-    ptimer_free(s->timer.ptimer);
-}
-#endif
 
 static void EHRPWM_class_init(ObjectClass *klass, void *data)
 {
@@ -579,9 +559,6 @@ static const TypeInfo EHRPWM_info = {
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(EHRPWMState),
     .instance_init = EHRPWM_init,
-#if 0
-    .instance_finalize = EHRPWM_finalize,
-#endif
     .class_init    = EHRPWM_class_init,
 };
 

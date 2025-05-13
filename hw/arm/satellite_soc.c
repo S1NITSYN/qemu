@@ -549,8 +549,8 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
         }
         memory_region_add_subregion(system_memory, 0xA0160000 + i * 0x10000,
                                     sysbus_mmio_get_region(busdev, 0));
-        /*sysbus_connect_irq(busdev, 0,
-                           qdev_get_gpio_in(DEVICE(&s->multiplexer), 1 + i));*/
+        sysbus_connect_irq(busdev, 0,
+                           qdev_get_gpio_in(DEVICE(&s->multiplexer), 64 + i));
     }
 
     if (object_resolve_path("canbus0", NULL)) {
@@ -578,10 +578,10 @@ static void SATELLITE_soc_realize(DeviceState *dev_soc, Error **errp) {
                                 sysbus_mmio_get_region(busdev, 0));
     sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(DEVICE(&s->multiplexer), 0));
 
-    // create_unimplemented_device("DMAC", 0xA0010000, 0x1000);       ??
-    // create_unimplemented_device("I2C", 0xA0200000, 0x10000);       ??
     create_unimplemented_device("QEP", 0xA01A0000,
                                 0x10000);
+    create_unimplemented_device("DMAC", 0xA0010000, 0x1000); //       ??
+    create_unimplemented_device("I2C", 0xA0200000, 0x10000); //       ??
     create_unimplemented_device("test_access_to_mem1_data", 0x60000000,
                                 0x10000);
     create_unimplemented_device("test_access_to_mem1_ECC", 0x60100000, 0x10000);
